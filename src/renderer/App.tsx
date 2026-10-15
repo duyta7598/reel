@@ -1,0 +1,18 @@
+import { useEffect, useState } from 'react'
+import { Compass, Download, Folder, Settings as SettingsIcon, Plus, X } from 'lucide-react'
+import type { AppState, Job, Movie } from '../shared/types'
+import { Discover } from './Discover'
+import { Library } from './Library'
+import { Settings } from './Settings'
+import { MovieDetail, AddTorrent } from './MovieDetail'
+import { SubtitlePicker } from './SubtitlePicker'
+import { Player } from './Player'
+import { Empty, Spinner, tFor } from './components'
+export function App(){
+  const[state,setState]=useState<AppState|null>(null),[error,setError]=useState(''),[tab,setTab]=useState('Discover'),[settings,setSettings]=useState(false),[movie,setMovie]=useState<Movie|null>(null),[manual,setManual]=useState(false),[subtitles,setSubtitles]=useState<Job|null>(null),[playing,setPlaying]=useState<Job|null>(null),[dismissed,setDismissed]=useState('')
+  useEffect(()=>{const unsubscribe=window.reel.subscribe(setState);window.reel.invoke('state',undefined).then(setState).catch(reason=>setError(reason.message));return unsubscribe},[])
+  useEffect(()=>{const media=window.matchMedia('(prefers-color-scheme: dark)');const update=()=>{document.documentElement.dataset.theme=state?.settings.appearance==='system'?(media.matches?'dark':'light'):state?.settings.appearance??'dark'};update();media.addEventListener('change',update);return()=>media.removeEventListener('change',update)},[state?.settings.appearance])
+  if(!state)return <div className="boot">{error?<Empty title="Reel" description={error}/>:<Spinner label="Reel"/>}</div>
+  const t=tFor(state.settings.interfaceLanguage),active=state.jobs.filter(job=>!job.completed).length,completed=state.jobs.length-active
+  return <div className="app-shell"><aside className="sidebar"><div className="traffic-space"/><div className="brand"><img src="./icon.png" width={28} height={28} alt=""/><strong>Reel</strong></div><small className="sidebar-heading">{t('Library').toUpperCase()}</small><nav>{([{name:'Discover',icon:Compass},{name:'Downloads',icon:Download,count:active},{name:'Library',icon:Folder,count:completed}]).map(({name,icon:Icon,count})=><button key={name} className={tab===name?'selected':''} onClick={()=>{setTab(name);setPlaying(null)}}><Icon size={19}/><span>{t(name)}</span>{count!==undefined&&<small>{count}</small>}</button>)}</nav><div className="sidebar-bottom"><small>{state.settings.torrentSources.filter(source=>source.enabled).length} sources</small><button onClick={()=>setSettings(true)}><SettingsIcon size={18}/>{t('Settings')}</button></div></aside><main><div className="window-toolbar"><span>{t(tab)}</span><button className="icon-button" aria-label={t('Add torrent')} title={t('Add torrent')} onClick={()=>setManual(true)}><Plus size={20}/></button></div>{state.notice&&state.notice!==dismissed&&<div className="notice"><button className="link" onClick={()=>setSettings(true)}>{t(state.notice)}</button><button className="icon-button" aria-label="Dismiss notice" onClick={()=>setDismissed(state.notice??'')}><X size={15}/></button></div>}{playing?<Player job={state.jobs.find(job=>job.id===playing.id)??playing} state={state} onClose={()=>setPlaying(null)}/>:tab==='Discover'?<Discover state={state} onSelect={setMovie} onSettings={()=>setSettings(true)}/>:<Library state={state} completed={tab==='Library'} onPreview={setPlaying} onSubtitles={setSubtitles}/>}</main>{settings&&<Settings state={state} onClose={()=>setSettings(false)}/ >}{movie&&<MovieDetail movie={movie} state={state} onClose={()=>setMovie(null)}/ >}{manual&&<AddTorrent state={state} onClose={()=>setManual(false)}/ >}{subtitles&&<SubtitlePicker job={subtitles} state={state} onClose={()=>setSubtitles(null)}/>}</div>
+}

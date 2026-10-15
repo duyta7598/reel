@@ -1,0 +1,85 @@
+{
+  "name": "reel-electron",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Personal movie downloads and subtitle preparation",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:ui": "npm run test:smoke",
+    "native": "cmake-js compile",
+    "package:mac": "node scripts/check-resources.mjs && npm run build && electron-builder --mac dir --arm64",
+    "package:win": "node scripts/check-resources.mjs && npm run build && electron-builder --win nsis --x64",
+    "test:smoke": "node --import tsx tests/smoke.mjs"
+  },
+  "build": {
+    "appId": "local.reel.electron",
+    "productName": "Reel",
+    "asar": true,
+    "npmRebuild": false,
+    "files": [
+      "out/**/*",
+      "build/Release/reel_engine.node",
+      "package.json",
+      "assets/**/*"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "extraResources": [
+      {
+        "from": "../Vendor/SubtitleTools",
+        "to": "SubtitleTools"
+      },
+      {
+        "from": "../Vendor",
+        "to": "Licenses",
+        "filter": [
+          "*-LICENSE.txt"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "icon": "assets/icon.icns",
+      "identity": null
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.2",
+    "lucide-react": "1.57.0",
+    "node-addon-api": "8.9.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/yauzl": "3.4.0",
+    "cmake-js": "8.0.0",
+    "electron": "44.7.2",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
