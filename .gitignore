@@ -23,3 +23,5 @@ compile_commands.json
 venv/
 *.pyo
 *.egg-info/
+.build-tools/
+vcpkg_installed/

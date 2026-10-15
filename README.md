@@ -29,11 +29,10 @@ The packaged application is `dist/mac-arm64/Reel.app`. It is an unsigned local b
 Build on Windows x64 with Node.js 24+, Python 3.12, CMake, Visual Studio 2022 C++ build tools and vcpkg. macOS native binaries cannot be included in a Windows installer.
 
 ```powershell
-vcpkg install libtorrent:x64-windows-static
 cd reel
 npm ci
 node node_modules/electron/install.js
-npm run native -- --runtime electron --runtime-version 44.7.2 --arch x64 --CDCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" --CDVCPKG_TARGET_TRIPLET=x64-windows-static --CDCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+npm run native -- --runtime electron --runtime-version 44.7.2 --arch x64 --CDCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" --CDVCPKG_MANIFEST_DIR="$PWD/native" --CDVCPKG_OVERLAY_TRIPLETS="$PWD/native/triplets" --CDVCPKG_TARGET_TRIPLET=x64-windows-static --CDCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 py -3.12 scripts/subtitle-tools/build.py
 npm run typecheck
 npm test
@@ -43,6 +42,8 @@ npm run package:win
 ```
 
 The Windows installer is emitted into `dist`. Windows compilation and runtime must be verified on a Windows machine before distribution. The timing fixture test currently runs on macOS only.
+
+GitHub Actions → Windows installer → Run workflow builds Windows x64 on demand, caches native dependencies and subtitle tools, checks localhost torrent transfer and the packaged app, and saves the installer in a draft prerelease. The job has a 90-minute timeout and does not run automatically on pushes.
 
 ## Data and credentials
 
