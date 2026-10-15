@@ -1,8 +1,10 @@
+import { resolve1337x } from './1337x'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import type { Alignment, AppState, EngineSnapshot, Job, Language, Movie, Release, SavedState, Settings, SubtitleMatch, SubtitleSource, TorrentSource } from '../shared/types'
+import { episodeCode, episodeIdentity, seasonIdentity, playableJobs, findJob } from '../shared/series'
 import { quality, releaseKey, retryDelay, safeName } from '../shared/matching'
 import { StateDatabase, defaults } from './database'
 import { Vault } from './vault'
@@ -36,9 +38,10 @@ export class Store extends EventEmitter {
   private ticks=0
   private syncTask?:Promise<void>
   constructor(readonly db:StateDatabase,readonly vault:Vault,readonly engine:Engine,tools:string){
-    super();this.state=db.load()??{version:2,settings:defaults(),jobs:[]}
+    super();this.state=db.load()??{version:3,settings:defaults(),jobs:[]}
+    if(this.state.version<3){if(!this.state.settings.torrentSources.some(source=>source.kind==='x1337'))this.state.settings.torrentSources.push(defaults().torrentSources.find(source=>source.kind==='x1337')!);this.state.version=3;db.save(this.state)}
     this.timing=new Timing(tools,db.root)
-    for(const job of this.state.jobs)if(job.subtitlePhase==='searching')job.subtitlePhase='pending'
+    for(const job of [...this.state.jobs,...playableJobs(this.state.jobs)])if(job.subtitlePhase==='searching')job.subtitlePhase='pending'
   }
   get settings(){return this.state.settings}
   get jobs(){return this.state.jobs}
@@ -46,14 +49,14 @@ export class Store extends EventEmitter {
     const credentialStatus:Record<string,boolean>={'catalog.tmdb':this.vault.has('catalog.tmdb')}
     for(const source of this.settings.subtitleSources)credentialStatus[source.id]=this.vault.has('subtitle.key.'+source.id)
     for(const source of this.settings.torrentSources)credentialStatus[source.id]=this.vault.has('torrent.'+source.id)
-    return {...structuredClone(this.state),syncing:this.syncing,subtitleBusy:[...this.busy.keys()],aligning:[...this.aligning],credentialStatus,sourceTests:{...this.sourceTests},engineReady:this.engineReady,notice:this.notice}
+    return {...structuredClone(this.state),syncing:this.syncing,subtitleBusy:[...this.busy.keys()],aligning:[...this.aligning],credentialStatus,sourceTests:{...this.sourceTests},engineReady:this.engineReady,notice:this.notice??(this.vault.needsReentry?'Some saved API keys could not be unlocked. Re-enter them in Settings.':undefined)}
   }
   publish(){this.emit('change',this.snapshot())}
   persist(){if(!this.closing)this.db.save(this.state)}
   async start(){
     try{
       await fs.mkdir(path.join(this.db.root,'Resume'),{recursive:true});await this.engine.call('create',path.join(this.db.root,'Resume'),false);this.engineReady=true
-      for(const job of this.jobs.filter(job=>!job.completed))try{await this.engine.call('add',job.id,job.uri,job.directory,true);if(job.paused)await this.engine.call('pause',job.id,true)}catch(error){job.engineError=errorText(error)}
+      for(const job of this.jobs.filter(job=>!job.completed))try{await this.engine.call('add',job.id,job.uri,job.directory,true,job.mediaType==='tv'?job.season!:-1,job.episode??-1);if(job.paused)await this.engine.call('pause',job.id,true)}catch(error){job.engineError=errorText(error)}
       this.timers.push(setInterval(()=>void this.poll(),2000))
     }catch(error){this.notice=errorText(error)}
     this.timers.push(setInterval(()=>void this.scan(),30_000));this.publish();void this.scan()
@@ -65,6 +68,19 @@ export class Store extends EventEmitter {
       for(const snapshot of snapshots){const job=this.jobs.find(job=>job.id===snapshot.id);if(!job)continue
         if(JSON.stringify(job.engine)!==JSON.stringify(snapshot)){job.engine=snapshot;job.paused=snapshot.paused;changed=true}
         if(snapshot.videoPath)job.videoPath=snapshot.videoPath
+        if(job.mediaType==='tv'&&snapshot.videos){
+          job.episodes??=[]
+          for(const file of snapshot.videos){
+            const id=job.id+'-file-'+file.index
+            let episode=job.episodes.find(item=>item.id===id)
+            if(!episode){episode={id,title:`${job.title.split(' · ')[0]} · ${episodeCode(file.season??job.season!,file.episode)}`,year:job.year,uri:job.uri,sourceURI:job.sourceURI,directory:job.directory,createdAt:job.createdAt,paused:job.paused,completed:false,videoPath:file.path,subtitlePhase:'pending',subtitleLanguages:[],subtitleError:'',engineError:'',subtitleSearchTitle:job.subtitleSearchTitle,mediaType:'tv',season:file.season??job.season,episode:file.episode,torrentID:job.id};job.episodes.push(episode)}
+            const newlyCompleted=!episode.completed&&file.completed
+            episode.completed=file.completed;episode.paused=job.paused;episode.videoPath=file.path
+            episode.engine={...snapshot,id,videoPath:file.path,videos:undefined,progress:file.size?file.downloaded/file.size:0,total:file.size,downloaded:file.downloaded,finished:file.completed}
+            if(newlyCompleted){this.persist();void this.scan()}
+          }
+          job.episodes.sort((a,b)=>(a.season??0)-(b.season??0)||(a.episode??0)-(b.episode??0)||a.videoPath.localeCompare(b.videoPath))
+        }
         if(snapshot.finished&&!job.completed){job.completed=true;job.paused=true;await this.engine.call('pause',job.id,true);this.persist();void this.scan()}
       }
       this.ticks++;if(this.ticks%8===0){await this.engine.call('save');this.persist()}
@@ -92,36 +108,38 @@ export class Store extends EventEmitter {
     try{const result=await testSource(source,secret);this.sourceTests[source.id]=result;this.publish();return result}catch(error){this.sourceTests[source.id]=errorText(error);this.publish();throw error}
   }
   async releases(movie:Movie){
-    if(movie.mediaType==='tv')throw new Error('Season and episode downloads are not supported yet.')
     const results=await Promise.all(this.settings.torrentSources.filter(source=>source.enabled).map(async source=>{try{return {releases:await searchTorrent(source,this.vault.get('torrent.'+source.id),movie),error:''}}catch(error){return{releases:[],error:source.name+': '+errorText(error)}}}))
     const seen=new Set<string>(),releases=results.flatMap(result=>result.releases).filter(release=>{const key=releaseKey(release.uri);if(seen.has(key))return false;seen.add(key);return true})
     releases.sort((a,b)=>Number(quality(b.title)===this.settings.quality)-Number(quality(a.title)===this.settings.quality)||(b.seeds??0)-(a.seeds??0))
-    return{releases,errors:results.map(result=>result.error).filter(Boolean)}
+    return{releases:movie.mediaType==='tv'?releases.filter(release=>{const identity=episodeIdentity(release.title);return identity?identity.season===movie.season&&(movie.episode===undefined?identity.episodes.length>1:identity.episodes.includes(movie.episode)):seasonIdentity(release.title)===movie.season}):releases,errors:results.map(result=>result.error).filter(Boolean)}
   }
   async add(release:Release,movie?:Movie,title?:string){
     if(!this.engineReady)throw new Error('The torrent engine is not ready.')
     if(!this.settings.downloadDirectory)throw new Error('Choose a download folder in Settings first.')
-    if(this.jobs.some(job=>releaseKey(job.sourceURI||job.uri)===releaseKey(release.uri)))throw new Error('This torrent is already in your library.')
-    const id=crypto.randomUUID(),name=movie?.title||title?.trim()||release.title
+    const source=release.sourceID?this.settings.torrentSources.find(item=>item.id===release.sourceID):undefined
+    if(release.sourceID&&!source)throw new Error('The torrent source was removed. Search releases again.')
+    const sourceURI=source?.kind==='x1337'?await resolve1337x(release.uri,source):release.uri
+    if(this.jobs.some(job=>releaseKey(job.sourceURI||job.uri)===releaseKey(sourceURI)))throw new Error('This torrent is already in your library.')
+    const id=crypto.randomUUID(),name=(movie?.title||title?.trim()||release.title)+(movie?.mediaType==='tv'?` · ${episodeCode(movie.season!,movie.episode)}`:'')
     let directory=path.join(this.settings.downloadDirectory,safeName(name+(movie?.year?` (${movie.year})`:'')))
     try{await fs.access(directory);directory=path.join(directory,id.slice(0,8))}catch{}
     await fs.mkdir(directory,{recursive:true})
-    let uri=release.uri
-    if(/^https?:\/\//.test(uri)){const data=await request(uri,{},8_000_000);await fs.mkdir(path.join(this.db.root,'Torrents'),{recursive:true});uri=path.join(this.db.root,'Torrents',id+'.torrent');await fs.writeFile(uri,data)}
+    let uri=sourceURI
+    if(/^https?:\/\//.test(uri)){const data=await request(uri,{networkGroup:'sources'},8_000_000);await fs.mkdir(path.join(this.db.root,'Torrents'),{recursive:true});uri=path.join(this.db.root,'Torrents',id+'.torrent');await fs.writeFile(uri,data)}
     else if(uri.startsWith('file:')){const url=new URL(uri);if(path.extname(url.pathname).toLowerCase()!=='.torrent')throw new Error('Choose a torrent file.');await fs.mkdir(path.join(this.db.root,'Torrents'),{recursive:true});uri=path.join(this.db.root,'Torrents',id+'.torrent');await fs.copyFile(url,uri)}
     else if(!uri.startsWith('magnet:?'))throw new Error('Paste a magnet or torrent URL, or choose a torrent file.')
-    await this.engine.call('add',id,uri,directory,false)
-    this.jobs.unshift({id,title:name,year:movie?.year??'',uri,sourceURI:release.uri,directory,createdAt:Date.now(),paused:false,completed:false,videoPath:'',subtitlePhase:'pending',subtitleLanguages:[],subtitleError:'',engineError:'',subtitleSearchTitle:movie?.searchTitle})
+    await this.engine.call('add',id,uri,directory,false,movie?.mediaType==='tv'?movie.season!:-1,movie?.episode??-1)
+    this.jobs.unshift({id,title:name,year:movie?.year??'',uri,sourceURI,directory,createdAt:Date.now(),paused:false,completed:false,videoPath:'',subtitlePhase:'pending',subtitleLanguages:[],subtitleError:'',engineError:'',subtitleSearchTitle:movie?.searchTitle,mediaType:movie?.mediaType,season:movie?.season,episode:movie?.episode,...(movie?.mediaType==='tv'?{episodes:[]}: {})})
     this.persist();this.publish();return this.snapshot()
   }
-  job(id:string){const job=this.jobs.find(job=>job.id===id);if(!job)throw new Error('The movie is no longer in your library.');return job}
-  async pause(id:string){const job=this.job(id);if(job.completed)return this.snapshot();await this.engine.call('pause',id,!job.paused);job.paused=!job.paused;this.persist();this.publish();return this.snapshot()}
-  async remove(id:string){const job=this.job(id);if(this.busy.has(id))throw new Error('Wait for subtitle processing to finish before removing this movie.');if(!job.completed&&!job.engineError)await this.engine.call('remove',id);this.state.jobs=this.jobs.filter(job=>job.id!==id);this.matches.delete(id);this.persist();this.publish();return this.snapshot()}
-  retry(){for(const job of this.jobs)if(job.completed)job.subtitleNextAttempt=undefined;this.persist();this.publish();void this.scan()}
-  private async scan(){if(this.closing||!this.settings.autoSubtitles||this.syncing||this.busy.size)return;const job=this.jobs.find(job=>job.completed&&(!job.subtitleNextAttempt||job.subtitleNextAttempt<=Date.now()));if(job)await this.fetchSubtitles(job.id,true)}
+  job(id:string){const job=findJob(this.jobs,id);if(!job)throw new Error('The movie is no longer in your library.');return job}
+  async pause(id:string){const target=this.job(id),job=target.torrentID?this.job(target.torrentID):target;if(job.completed)return this.snapshot();await this.engine.call('pause',job.id,!job.paused);job.paused=!job.paused;for(const episode of job.episodes??[])episode.paused=job.paused;this.persist();this.publish();return this.snapshot()}
+  async remove(id:string){const job=this.job(id);if(job.torrentID)throw new Error('Remove the season from the library instead.');if([job,...(job.episodes??[])].some(item=>this.busy.has(item.id)))throw new Error('Wait for subtitle processing to finish before removing this movie.');if(!job.completed&&!job.engineError)await this.engine.call('remove',id);this.state.jobs=this.jobs.filter(job=>job.id!==id);this.matches.delete(id);this.persist();this.publish();return this.snapshot()}
+  retry(){for(const job of playableJobs(this.jobs))if(job.completed)job.subtitleNextAttempt=undefined;this.persist();this.publish();void this.scan()}
+  private async scan(){if(this.closing||!this.settings.autoSubtitles||this.syncing||this.busy.size)return;const job=playableJobs(this.jobs).find(job=>job.completed&&(!job.subtitleNextAttempt||job.subtitleNextAttempt<=Date.now()));if(job)await this.fetchSubtitles(job.id,true)}
   sync(){
     if(this.syncing||this.closing)return this.snapshot();this.syncing=true;this.publish()
-    this.syncTask=(async()=>{try{for(const job of [...this.jobs].filter(job=>job.completed)){if(this.closing)break;if(this.busy.has(job.id)){await this.busy.get(job.id);continue}await this.fetchSubtitles(job.id,true)}}finally{this.syncing=false;this.persist();this.publish()}})()
+    this.syncTask=(async()=>{try{for(const job of playableJobs(this.jobs).filter(job=>job.completed)){if(this.closing)break;if(this.busy.has(job.id)){await this.busy.get(job.id);continue}await this.fetchSubtitles(job.id,true)}}finally{this.syncing=false;this.persist();this.publish()}})()
     return this.snapshot()
   }
   private task<T>(id:string,operation:()=>Promise<T>):Promise<T>{
@@ -130,6 +148,7 @@ export class Store extends EventEmitter {
     this.busy.set(id,work);this.publish();return work
   }
   async fetchSubtitles(id:string,automatic:boolean):Promise<SubtitleMatch[]>{
+    if(this.job(id).mediaType==='tv'&&this.job(id).episode===undefined)throw new Error('Choose an episode to manage subtitles.')
     if(this.busy.has(id)){await this.busy.get(id);return this.matches.get(id)??[]}
     return this.task(id,async()=>{
       const job=this.job(id);if(!job.completed)return []
@@ -144,7 +163,7 @@ export class Store extends EventEmitter {
         if(!sources.length||!this.settings.languages.length){job.subtitlePhase='needsConfiguration';job.subtitleError='Enable a subtitle source and add its API key in Settings.';return []}
         job.subtitlePhase='searching';this.publish()
         const matches:SubtitleMatch[]=[],failures:string[]=[]
-        for(const source of sources){if(this.closing)return [];try{matches.push(...await searchSubtitle(source,this.vault.get('subtitle.key.'+source.id),job.subtitleSearchTitle??job.title,job.year,path.basename(video),automatic?missing:this.settings.languages));this.sourceTests[source.id]='Connected successfully.'}catch(error){failures.push(source.name+': '+errorText(error))}}
+        for(const source of sources){if(this.closing)return [];try{matches.push(...await searchSubtitle(source,this.vault.get('subtitle.key.'+source.id),job.subtitleSearchTitle??job.title,job.year,path.basename(video),automatic?missing:this.settings.languages,job.mediaType==='tv'&&job.season!==undefined&&job.episode!==undefined?{season:job.season,episode:job.episode}:undefined));this.sourceTests[source.id]='Connected successfully.'}catch(error){failures.push(source.name+': '+errorText(error))}}
         matches.sort((a,b)=>b.confidence-a.confidence);this.matches.set(id,matches)
         if(automatic){
           for(const language of missing){
@@ -167,11 +186,11 @@ export class Store extends EventEmitter {
     const video=videoFile(job),destination=subtitleFile(video,match.language),previous=await readOptional(destination)
     const scratch=path.join(this.db.root,'SubtitleWork',crypto.randomUUID());await fs.mkdir(scratch,{recursive:true})
     try{
-      const original=await downloadSubtitle(source,this.vault.get('subtitle.key.'+source.id),match),staged=path.join(scratch,'input.srt');await fs.writeFile(staged,original)
+      const original=await downloadSubtitle(source,this.vault.get('subtitle.key.'+source.id),match,path.basename(video)),staged=path.join(scratch,'input.srt');await fs.writeFile(staged,original)
       let alignment:Alignment|undefined,warning:string|undefined
       if(this.settings.autoAlignSubtitles){this.aligning.add(job.id);this.publish();try{alignment=await this.timing.align(video,staged)}catch(error){if(requireVerified)throw error;warning=errorText(error)}finally{this.aligning.delete(job.id);this.publish()}}
       else if(requireVerified)throw new TimingRejected()
-      if(this.closing||!this.jobs.some(item=>item.id===job.id))throw new Error('Subtitle processing was cancelled.')
+      if(this.closing||!findJob(this.jobs,job.id))throw new Error('Subtitle processing was cancelled.')
       const current=await readOptional(destination)
       if(!sameBuffer(current,previous))throw new Error('The subtitle changed during alignment. Please try again.')
       const output=validateSubtitle(await fs.readFile(staged))

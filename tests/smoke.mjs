@@ -7,13 +7,15 @@ import { execFileSync } from 'node:child_process'
 import { StateDatabase, defaults } from '../src/main/database.ts'
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'reel-electron-smoke-'))
 const movie=path.join(root,'Preview.mp4')
-execFileSync(path.resolve('../Vendor/SubtitleTools',process.platform==='win32'?'ffmpeg.exe':'ffmpeg'),['-nostdin','-y','-v','error','-f','lavfi','-i','color=c=blue:s=320x180:r=24:d=5','-f','lavfi','-i','sine=frequency=440:duration=5','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',movie])
+execFileSync(path.resolve('Vendor/SubtitleTools',process.platform==='win32'?'ffmpeg.exe':'ffmpeg'),['-nostdin','-y','-v','error','-f','lavfi','-i','color=c=blue:s=320x180:r=24:d=5','-f','lavfi','-i','sine=frequency=440:duration=5','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',movie])
 fs.writeFileSync(path.join(root,'Preview.vi.srt'),'1\n00:00:00,000 --> 00:00:05,000\nPhụ đề kiểm tra\n')
 const db=new StateDatabase(root),settings=defaults();settings.autoSubtitles=false
-db.save({version:2,settings,jobs:[{id:'fixture',title:'Preview fixture',year:'2026',uri:'',sourceURI:'',directory:root,createdAt:Date.now(),paused:true,completed:true,videoPath:movie,subtitlePhase:'complete',subtitleLanguages:['vi'],subtitleError:'',engineError:''}]});db.close()
+const fixture={id:'fixture',title:'Preview fixture',year:'2026',uri:'',sourceURI:'',directory:root,createdAt:Date.now(),paused:true,completed:true,videoPath:movie,subtitlePhase:'complete',subtitleLanguages:['vi'],subtitleError:'',engineError:''}
+const series={...fixture,id:'series',title:'TV fixture · S01',mediaType:'tv',season:1,videoPath:'Preview.S01E01.mp4',subtitleLanguages:[],subtitlePhase:'pending',episodes:[1,2].map(number=>{const videoPath=`Preview.S01E0${number}.mp4`;fs.copyFileSync(movie,path.join(root,videoPath));fs.writeFileSync(path.join(root,`Preview.S01E0${number}.vi.srt`),`1\n00:00:00,000 --> 00:00:05,000\nPhụ đề tập ${number}\n`);return{...fixture,id:`series-file-${number}`,title:`TV fixture · S01E0${number}`,videoPath,mediaType:'tv',season:1,episode:number,torrentID:'series'}})}
+db.save({version:2,settings,jobs:[fixture,series]});db.close()
 const env={...process.env,REEL_HEADLESS:'1',REEL_DATA_DIR:root}
 delete env.ELECTRON_RUN_AS_NODE
-const application=await electron.launch({...(process.env.REEL_APP_PATH?{executablePath:process.platform==='win32'?process.env.REEL_APP_PATH:path.join(process.env.REEL_APP_PATH,'Contents/MacOS/Reel Electron'),args:[]}:{args:[path.resolve('.')]}),env,timeout:30_000})
+const application=await electron.launch({...(process.env.REEL_APP_PATH?{executablePath:process.platform==='win32'?process.env.REEL_APP_PATH:path.join(process.env.REEL_APP_PATH,'Contents/MacOS/Reel'),args:[]}:{args:[path.resolve('.')]}),env,timeout:30_000})
 try{
   const page=await application.firstWindow(),errors=[]
   page.setDefaultTimeout(15_000)
@@ -25,6 +27,33 @@ try{
   await page.waitForFunction(async()=>Boolean((await window.reel.invoke('state')).engineReady))
   await page.getByRole('button',{name:'Settings',exact:true}).click()
   await page.getByText('Appearance',{exact:true}).waitFor()
+  await page.getByRole('button',{name:'Network',exact:true}).click()
+  assert.equal(await page.getByLabel('Connection mode',{exact:true}).inputValue(),'auto')
+  await page.getByText('Advanced network settings',{exact:true}).click()
+  await page.getByLabel('Proxy address',{exact:true}).fill('http://127.0.0.1:40001')
+  await page.getByRole('button',{name:'Save',exact:true}).click()
+  await page.waitForFunction(async()=>(await window.reel.invoke('state')).settings.network.proxyURL==='http://127.0.0.1:40001')
+  await page.getByRole('button',{name:'Reset defaults',exact:true}).click()
+  await page.getByRole('button',{name:'Save',exact:true}).click()
+  await page.waitForFunction(async()=>(await window.reel.invoke('state')).settings.network.proxyURL==='http://127.0.0.1:40000')
+  if(process.env.REEL_TEST_WARP==='1'){
+    await page.evaluate(async()=>{const state=await window.reel.invoke('state');await window.reel.invoke('saveSettings',{network:{...state.settings.network,mode:'proxy'}})})
+    const checked=await page.evaluate(()=>window.reel.invoke('testNetwork',undefined))
+    assert.equal(checked.error,undefined);assert.equal(checked.routes.some(route=>route.host==='api.themoviedb.org'&&route.route==='proxy'),true)
+    await page.evaluate(async()=>{const state=await window.reel.invoke('state');await window.reel.invoke('saveSettings',{network:{...state.settings.network,mode:'auto'}})})
+  }
+  await page.screenshot({path:path.join(root,'network.png')})
+  await page.getByRole('button',{name:'General',exact:true}).click()
+  await page.getByRole('button',{name:'Torrent sources',exact:true}).click()
+  const sourceCard=page.locator('.source-card').filter({hasText:'1337x'})
+  await sourceCard.getByText('1337x',{exact:true}).waitFor()
+  assert.equal(await sourceCard.getByText('API key not configured',{exact:true}).count(),0)
+  await sourceCard.locator('summary').click()
+  await sourceCard.getByRole('button',{name:'Edit',exact:true}).click()
+  assert.equal(await page.getByLabel('Connector').inputValue(),'x1337')
+  assert.equal(await page.getByLabel('API key',{exact:true}).count(),0)
+  await page.getByRole('button',{name:'Cancel',exact:true}).click()
+  await page.getByRole('button',{name:'General',exact:true}).click()
   await page.evaluate(()=>window.reel.invoke('saveSettings',{appearance:'light',interfaceLanguage:'vi'}))
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='light')
   await page.getByRole('button',{name:'Close',exact:true}).click()
@@ -44,10 +73,23 @@ try{
   const compatible=await page.evaluate(()=>window.reel.invoke('preview',{id:'fixture',start:1,transcode:true}))
   const stream=await fetch(compatible.url),reader=stream.body.getReader();assert.equal(stream.status,200);assert.ok((await reader.read()).value.length>0);await reader.cancel()
   await page.getByRole('button',{name:'Back to library',exact:true}).click()
+  for(const number of [1,2]){
+    await page.getByRole('button',{name:'Episodes · 2 / 2',exact:true}).click()
+    await page.getByRole('button',{name:`Play TV fixture · S01E0${number}`,exact:true}).click()
+    await page.waitForFunction(()=>document.querySelector('video')?.readyState>=2)
+    await page.getByRole('button',{name:'Play',exact:true}).click()
+    await page.getByText(`Phụ đề tập ${number}`,{exact:true}).waitFor()
+    await page.waitForFunction(()=>document.querySelector('video')?.currentTime>0.2)
+    await page.getByRole('button',{name:'Back to library',exact:true}).click()
+  }
+  await page.getByRole('button',{name:'Episodes · 2 / 2',exact:true}).click()
+  await page.getByRole('button',{name:'Subtitles TV fixture · S01E02',exact:true}).click()
+  await page.getByText('Preview.S01E02.mp4',{exact:true}).waitFor()
+  await page.getByRole('button',{name:'Close',exact:true}).click()
   await page.getByRole('button',{name:'Add torrent',exact:true}).click()
   await page.getByRole('button',{name:'Start download',exact:true}).waitFor()
   await page.getByRole('button',{name:'Cancel',exact:true}).click()
   assert.equal(await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(window=>window.isVisible())),false)
   assert.deepEqual(errors,[])
-  process.stdout.write(JSON.stringify({passed:true,checks:['native worker','isolated preload IPC','downloads','settings','light/dark','Vietnamese','library','torrent dialog','hidden window','video playback','subtitle overlay','byte-range seek','local server authorization','compatible preview'],screenshot:path.join(root,'light.png')})+'\n')
+  process.stdout.write(JSON.stringify({passed:true,checks:['native worker','isolated preload IPC','downloads','settings','light/dark','Vietnamese','library','torrent dialog','hidden window','video playback','subtitle overlay','byte-range seek','local server authorization','compatible preview','TV episode list','per-episode playback and subtitle overlay','per-episode subtitle management','1337x source settings without API key','automatic network defaults and editable proxy'],screenshot:path.join(root,'light.png')})+'\n')
 }catch(error){const page=await application.firstWindow();process.stdout.write(JSON.stringify({error:String(error),body:await page.locator('body').innerText()})+'\n');throw error}finally{await application.evaluate(({app})=>app.quit());await application.close()}

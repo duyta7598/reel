@@ -1,4 +1,4 @@
-import type { CatalogPage, CatalogRequest, Movie, Provider, Language } from '../shared/types'
+import type { CatalogPage, CatalogRequest, Movie, Provider, Language, TVSeason, TVEpisode } from '../shared/types'
 import { endpoint, json } from './network'
 const tmdb = 'https://api.themoviedb.org/3'
 export async function providers(token: string, type: string, region: string, language: Language): Promise<Provider[]> {
@@ -31,4 +31,21 @@ export async function catalog(input: CatalogRequest, token: string, language: La
   } catch {}
   const result = await json(endpoint('https://itunes.apple.com/search',{term:input.query,limit:'100',country:'us',entity:'movie'}))
   return {movies:(result.results??[]).filter((item:any)=>item.kind==='feature-movie').map((item:any):Movie=>({id:`apple-${item.trackId}`,title:item.trackName,searchTitle:item.trackName,year:(item.releaseDate??'').slice(0,4),genre:item.primaryGenreName??'Movies',overview:item.longDescription??'',poster:item.artworkUrl100?.replace('100x100bb','400x600bb'),mediaType:'movie'})),hasMore:false,attribution:'Apple iTunes title search'}
+}
+
+async function tvDetails(id:string,token:string,language:Language,season?:number){
+  const match=id.match(/^tmdb-tv-(\d+)$/)
+  if(!match)throw new Error('Invalid TV show identifier.')
+  if(!token)throw new Error('Add a TMDB token in Settings to browse TV shows.')
+  return json(endpoint(`${tmdb}/tv/${match[1]}${season===undefined?'':`/season/${season}`}`,{language:language==='vi'?'vi-VN':'en-US'}),{headers:{Authorization:`Bearer ${token}`}})
+}
+export async function tvSeasons(id:string,token:string,language:Language):Promise<TVSeason[]>{
+  const result=await tvDetails(id,token,language)
+  if(!Array.isArray(result.seasons))throw new Error('Could not read TV seasons.')
+  return result.seasons.filter((item:any)=>Number.isInteger(item.season_number)&&item.season_number>=0&&item.episode_count>0).map((item:any)=>({number:item.season_number,name:String(item.name??''),episodeCount:item.episode_count})).sort((a:TVSeason,b:TVSeason)=>a.number-b.number)
+}
+export async function tvEpisodes(id:string,season:number,token:string,language:Language):Promise<TVEpisode[]>{
+  const result=await tvDetails(id,token,language,season)
+  if(!Array.isArray(result.episodes))throw new Error('Could not read TV episodes.')
+  return result.episodes.filter((item:any)=>Number.isInteger(item.episode_number)&&item.episode_number>0).map((item:any)=>({number:item.episode_number,name:String(item.name??''),airDate:item.air_date??undefined})).sort((a:TVEpisode,b:TVEpisode)=>a.number-b.number)
 }

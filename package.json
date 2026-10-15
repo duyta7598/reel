@@ -31,11 +31,11 @@
     ],
     "extraResources": [
       {
-        "from": "../Vendor/SubtitleTools",
+        "from": "Vendor/SubtitleTools",
         "to": "SubtitleTools"
       },
       {
-        "from": "../Vendor",
+        "from": "Vendor",
         "to": "Licenses",
         "filter": [
           "*-LICENSE.txt"
@@ -62,8 +62,10 @@
     "fast-xml-parser": "5.11.2",
     "lucide-react": "1.57.0",
     "node-addon-api": "8.9.2",
+    "node-html-parser": "9.0.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "undici": "8.12.1",
     "yauzl": "3.4.0"
   },
   "devDependencies": {

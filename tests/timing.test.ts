@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Timing } from '../src/main/timing'
 import { parseSRT } from '../src/shared/matching'
-const fixtures=path.resolve(import.meta.dirname,'../../Tests/Fixtures'),tools=path.resolve(import.meta.dirname,'../../Vendor/SubtitleTools')
+const fixtures=path.resolve(import.meta.dirname,'fixtures'),tools=path.resolve(import.meta.dirname,'../Vendor/SubtitleTools')
 function shifted(cues:ReturnType<typeof parseSRT>,offset:number){const stamp=(seconds:number)=>{const ms=Math.round(seconds*1000);return `${String(Math.floor(ms/3600000)).padStart(2,'0')}:${String(Math.floor(ms/60000)%60).padStart(2,'0')}:${String(Math.floor(ms/1000)%60).padStart(2,'0')},${String(ms%1000).padStart(3,'0')}`};return cues.map((cue,index)=>`${index+1}\n${stamp(cue.start+offset)} --> ${stamp(cue.end+offset)}\n${cue.text}\n`).join('\n')}
 test('Electron timing uses the bundled tool to fix actual speech audio',{timeout:20_000,skip:process.platform!=='darwin'},async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'reel-timing-'))

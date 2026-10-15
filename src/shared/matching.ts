@@ -1,3 +1,4 @@
+import { episodeIdentity } from './series'
 import type { SubtitleCue, SubtitleMatch } from './types'
 export const normalize = (value: string) => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '')
 const profile = (value: string) => {
@@ -5,7 +6,7 @@ const profile = (value: string) => {
   const tokens = clean.split(/[^a-z0-9]+/).filter(Boolean)
   const year = tokens.filter(token => /^(19|20)\d{2}$/.test(token)).at(-1)
   const technical = ['480p','720p','1080p','2160p','bluray','brrip','bdrip','web','webrip','webdl','hdtv','dvdrip']
-  const boundary = tokens.findIndex(token => token === year || technical.includes(token))
+  const boundary = tokens.findIndex(token => token === year || technical.includes(token) || /^s\d+e\d+|^\d+x\d+$/.test(token))
   const normalized = normalize(clean)
   const source = ['bluray','brrip','bdrip'].some(word => normalized.includes(word)) ? 'bluray' : ['webdl','webrip'].some(word => normalized.includes(word)) ? 'web' : normalized.includes('hdtv') ? 'hdtv' : normalized.includes('dvd') ? 'dvd' : undefined
   const resolution = tokens.find(token => /^(480|720|1080|2160)p$/.test(token))
@@ -15,6 +16,8 @@ const profile = (value: string) => {
   return { title: tokens.slice(0, boundary < 0 ? tokens.length : boundary).join(''), year, source, resolution, codec, editions, group }
 }
 export function confidence(release: string, filename: string): number {
+  const aEpisode=episodeIdentity(filename),bEpisode=episodeIdentity(release)
+  if(aEpisode||bEpisode){if(!aEpisode||!bEpisode||aEpisode.season!==bEpisode.season||aEpisode.episodes.join(',')!==bEpisode.episodes.join(','))return 0}
   const stem = filename.replace(/\.(mkv|mp4|avi|mov|m4v|webm)$/i, '')
   if (!release) return 0
   if (normalize(release) === normalize(stem)) return 0.95
@@ -23,6 +26,7 @@ export function confidence(release: string, filename: string): number {
   if (a.editions !== b.editions) return 0.1
   if (a.source && b.source && a.source !== b.source) return 0.2
   let score = 0.55
+  if(aEpisode&&bEpisode)score+=0.15
   if (a.year && a.year === b.year) score += 0.15
   if (a.source && a.source === b.source) score += 0.15
   if (a.resolution && a.resolution === b.resolution) score += 0.02

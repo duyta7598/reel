@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle2 } from 'lucide-react'
 import type { AppState, Job, Language, SubtitleMatch } from '../shared/types'
+import { findJob } from '../shared/series'
 import { recommended } from '../shared/matching'
 import { Empty, ErrorLine, Modal, Spinner, tFor } from './components'
 export function SubtitlePicker({job,state,onClose}:{job:Job;state:AppState;onClose:()=>void}){
   const t=tFor(state.settings.interfaceLanguage),[matches,setMatches]=useState<SubtitleMatch[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[saving,setSaving]=useState(''),[saved,setSaved]=useState(new Set<string>()),[toolBusy,setToolBusy]=useState(false)
-  const current=state.jobs.find(item=>item.id===job.id)??job,aligning=state.aligning.includes(job.id),busy=loading||Boolean(saving)||toolBusy||aligning
+  const current=findJob(state.jobs,job.id)??job,aligning=state.aligning.includes(job.id),busy=loading||Boolean(saving)||toolBusy||aligning
   const search=async()=>{setLoading(true);setError('');try{setMatches(await window.reel.invoke('searchSubtitles',{id:job.id}))}catch(reason){setError((reason as Error).message)}finally{setLoading(false)}}
   useEffect(()=>{void search()},[job.id])
   const use=async(match:SubtitleMatch)=>{setSaving(match.id);setError('');try{await window.reel.invoke('useSubtitle',{id:job.id,matchID:match.id});setSaved(previous=>new Set([...previous,match.id]))}catch(reason){setError((reason as Error).message)}finally{setSaving('')}}

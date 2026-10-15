@@ -1,3 +1,4 @@
+import { routedFetch, type NetworkRequestInit } from './routing'
 const activeRequests=new Set<AbortController>()
 export function abortRequests(){for(const controller of activeRequests)controller.abort();activeRequests.clear()}
 export function endpoint(base: string, params: Record<string, string | undefined> = {}): URL {
@@ -6,14 +7,14 @@ export function endpoint(base: string, params: Record<string, string | undefined
   for (const [key,value] of Object.entries(params)) if (value !== undefined && value !== '') url.searchParams.set(key,value)
   return url
 }
-export async function request(url: string | URL, options: RequestInit = {}, maxBytes = 16_000_000): Promise<Buffer> {
+export async function request(url: string | URL, options: NetworkRequestInit = {}, maxBytes = 16_000_000): Promise<Buffer> {
   const controller = new AbortController(); activeRequests.add(controller); let timedOut = false
   const timer = setTimeout(() => { timedOut = true; controller.abort() }, 30_000)
   try {
     let target=new URL(url),headers=new Headers(options.headers),response:Response
     headers.set('User-Agent','Reel/0.2')
     for(let redirects=0;;redirects++){
-      response=await fetch(target,{...options,headers,redirect:'manual',signal:controller.signal})
+      response=await routedFetch(target,{...options,headers,redirect:'manual',signal:controller.signal})
       if(![301,302,303,307,308].includes(response.status))break
       const location=response.headers.get('location');await response.body?.cancel()
       if(!location||redirects>=5)throw new Error('The source returned too many redirects.')
@@ -37,4 +38,4 @@ export async function request(url: string | URL, options: RequestInit = {}, maxB
     throw error
   } finally { clearTimeout(timer); activeRequests.delete(controller) }
 }
-export async function json(url: string | URL, options?: RequestInit): Promise<any> { return JSON.parse((await request(url, options)).toString('utf8')) }
+export async function json(url: string | URL, options?: NetworkRequestInit): Promise<any> { return JSON.parse((await request(url, options)).toString('utf8')) }

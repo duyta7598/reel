@@ -9,8 +9,9 @@ import { Vault } from './vault'
 import { Engine } from './engine'
 import { Store, videoFile, subtitleFile } from './store'
 import { MediaServer } from './media'
-import { catalog, providers } from './catalog'
+import { catalog, providers, tvSeasons, tvEpisodes } from './catalog'
 import * as validate from './validation'
+import { configureNetwork, initializeNetwork, networkStatus, testNetwork, closeNetwork } from './routing'
 import { abortRequests } from './network'
 let win:BrowserWindow|null=null,store:Store,media:MediaServer,tray:Tray|null=null,quitting=false
 const hidden=process.env.REEL_HEADLESS==='1'
@@ -34,17 +35,22 @@ function showWindow(){
 async function command<K extends keyof CommandMap>(name:K,input:any):Promise<any>{
   switch(name){
     case 'state':return store.snapshot()
-    case 'saveSettings':return store.saveSettings(validate.settings(input))
+    case 'saveSettings':{const value=validate.settings(input),state=store.saveSettings(value);if(value.network){configureNetwork(value.network);if(!hidden)void initializeNetwork().catch(()=>{})}return state}
+    case 'networkStatus':return networkStatus()
+    case 'testNetwork':return testNetwork()
+    case 'prepareNetwork':await initializeNetwork();return networkStatus()
+    case 'tvSeasons':return tvSeasons(validate.id(input?.id),store.vault.get('catalog.tmdb'),store.settings.interfaceLanguage)
+    case 'tvEpisodes':return tvEpisodes(validate.id(input?.id),validate.season(input?.season),store.vault.get('catalog.tmdb'),store.settings.interfaceLanguage)
     case 'saveTMDB':store.vault.set('catalog.tmdb',validate.text(input?.token,10_000));store.publish();return store.snapshot()
-    case 'catalog':{const value=input as CatalogRequest;if(!['movie','tv'].includes(value?.type)||!Number.isInteger(value.page)||value.page<1||value.page>500||!Number.isInteger(value.provider)||value.provider<0)throw new Error('Invalid catalog request.');validate.text(value.query,300);if(!/^[A-Z]{2}$/.test(value.region))throw new Error('Invalid region.');return catalog(value,store.vault.get('catalog.tmdb'),store.settings.interfaceLanguage)}
+    case 'catalog':{const value=input as CatalogRequest;if(!['movie','tv'].includes(value?.type)||!Number.isInteger(value.page)||value.page<1||value.page>500||!Number.isInteger(value.provider)||value.provider<0)throw new Error('Invalid catalog request.');validate.text(value.query,300);if(!/^[A-Z]{2}$/.test(value.region))throw new Error('Invalid region.');const result=await catalog(value,store.vault.get('catalog.tmdb'),store.settings.interfaceLanguage);return{...result,movies:result.movies.map(movie=>({...movie,poster:movie.poster?.startsWith('https://image.tmdb.org/')?media.poster(movie.poster):movie.poster}))}}
     case 'providers':if(!['movie','tv'].includes(input?.type)||!/^[A-Z]{2}$/.test(input.region))throw new Error('Invalid service request.');return providers(store.vault.get('catalog.tmdb'),input.type,input.region,store.settings.interfaceLanguage)
     case 'chooseDirectory':{const result=await dialog.showOpenDialog({properties:['openDirectory','createDirectory']});if(result.canceled)return null;store.saveSettings({downloadDirectory:result.filePaths[0]});return result.filePaths[0]}
     case 'torrentFile':{const result=await dialog.showOpenDialog({filters:[{name:'Torrent',extensions:['torrent']}],properties:['openFile']});return result.canceled?null:pathToFileURL(result.filePaths[0]).href}
-    case 'searchReleases':validate.text(input?.title,500);validate.text(input?.searchTitle,500);return store.releases(input as Movie)
-    case 'addDownload':{const release=input?.release as Release;validate.text(release?.uri,10_000);validate.text(release?.title,1000);if(input.movie?.mediaType==='tv')throw new Error('Season and episode downloads are not supported yet.');if(!store.settings.downloadDirectory){const result=await command('chooseDirectory',undefined);if(!result)throw new Error('Choose a download folder before downloading.')}return store.add(release,input.movie,input.title)}
+    case 'searchReleases':return store.releases(validate.movie(input))
+    case 'addDownload':{const release=input?.release as Release;validate.text(release?.uri,10_000);validate.text(release?.title,1000);const movie=input.movie?validate.movie(input.movie):undefined;if(!store.settings.downloadDirectory){const result=await command('chooseDirectory',undefined);if(!result)throw new Error('Choose a download folder before downloading.')}return store.add(release,movie,input.title)}
     case 'pauseDownload':return store.pause(validate.id(input?.id))
     case 'removeDownload':return store.remove(validate.id(input?.id))
-    case 'reveal':shell.showItemInFolder(videoFile(store.job(validate.id(input?.id))));return
+    case 'reveal':{const job=store.job(validate.id(input?.id));shell.showItemInFolder(job.mediaType==='tv'&&!job.torrentID?job.directory:videoFile(job));return}
     case 'testSource':return store.testSource(validate.source(input?.source),input.key===undefined?undefined:validate.text(input.key,10_000))
     case 'saveSource':return store.saveSource(validate.source(input?.source),input.key===undefined?undefined:validate.text(input.key,10_000))
     case 'deleteSource':return store.deleteSource(validate.id(input?.id))
@@ -67,17 +73,18 @@ else{
   app.whenReady().then(async()=>{
     if(!hidden&&process.platform==='darwin')app.dock?.setIcon(appIcon)
     const addon=app.isPackaged?path.join(process.resourcesPath,'app.asar.unpacked/build/Release/reel_engine.node'):path.join(__dirname,'../../build/Release/reel_engine.node')
-    const tools=app.isPackaged?path.join(process.resourcesPath,'SubtitleTools'):path.join(__dirname,'../../../Vendor/SubtitleTools')
+    const tools=app.isPackaged?path.join(process.resourcesPath,'SubtitleTools'):path.join(__dirname,'../../Vendor/SubtitleTools')
     const db=new StateDatabase(root),vault=new Vault(root),engine=new Engine(addon)
     store=new Store(db,vault,engine,tools)
+    configureNetwork(store.settings.network)
     media=new MediaServer(store,tools);await media.start()
     ipcMain.handle('reel:command',async(event,name,input)=>{if(event.sender!==win?.webContents||!allowedSender(event.senderFrame?.url??''))throw new Error('Untrusted IPC sender.');return command(name,input)})
     store.on('change',state=>{if(win&&!win.isDestroyed())win.webContents.send('reel:state',state)})
     if(!hidden){const icon=nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAJElEQVR4nGNgoBaQq/j6nxRMOwOIdelwNmA0FgaDAQMXC+QCAOFpCCCIFhwGAAAAAElFTkSuQmCC');if(process.platform==='darwin')icon.setTemplateImage(true);tray=new Tray(icon);tray.setToolTip('Reel');tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Reel',click:showWindow},{label:'Sync subtitles',click:()=>store.sync()},{type:'separator'},{label:'Quit Reel',click:()=>app.quit()}]));tray.on('click',showWindow)}
     Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Reel',submenu:[{label:'Open Reel',click:showWindow},{role:'quit'}]},{role:'editMenu'},{role:'viewMenu'},{role:'windowMenu'}]))
-    showWindow();await store.start()
+    showWindow();if(!hidden)void initializeNetwork().catch(()=>{});await store.start()
   }).catch(error=>{if(!hidden)dialog.showErrorBox('Reel',error instanceof Error?error.message:'Could not start Reel.');app.exit(1)})
   app.on('activate',()=>{if(store)showWindow()})
   app.on('window-all-closed',()=>{})
-  app.on('before-quit',event=>{if(quitting)return;event.preventDefault();quitting=true;abortRequests();void(async()=>{try{if(media)await media.close();if(store)await store.close()}finally{tray?.destroy();app.quit()}})()})
+  app.on('before-quit',event=>{if(quitting)return;event.preventDefault();quitting=true;abortRequests();void(async()=>{try{if(media)await media.close();if(store)await store.close();await closeNetwork()}finally{tray?.destroy();app.quit()}})()})
 }

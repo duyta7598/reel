@@ -13,7 +13,7 @@ static Napi::Object init(Napi::Env env, Napi::Object exports) {
         if (!h) throw Napi::Error::New(info.Env(), "Could not start libtorrent");
         return Napi::External<Holder>::New(info.Env(), new Holder{h}, [](Napi::Env, Holder* item) { if (item->handle) reel_destroy(item->handle); delete item; });
     }));
-    exports.Set("add", Napi::Function::New(env, [](Napi::CallbackInfo const& info) { auto h=holder(info)->handle; if (!reel_add(h,text(info,1).c_str(),text(info,2).c_str(),text(info,3).c_str(),info[4].As<Napi::Boolean>().Value())) throw Napi::Error::New(info.Env(),reel_error(h)); }));
+    exports.Set("add", Napi::Function::New(env, [](Napi::CallbackInfo const& info) { auto h=holder(info)->handle; if (!reel_add(h,text(info,1).c_str(),text(info,2).c_str(),text(info,3).c_str(),info[4].As<Napi::Boolean>().Value(),info.Length()>5?info[5].As<Napi::Number>().Int32Value():-1,info.Length()>6?info[6].As<Napi::Number>().Int32Value():-1)) throw Napi::Error::New(info.Env(),reel_error(h)); }));
     exports.Set("pause", Napi::Function::New(env, [](Napi::CallbackInfo const& info) { auto h=holder(info)->handle; if (!reel_pause(h,text(info,1).c_str(),info[2].As<Napi::Boolean>().Value())) throw Napi::Error::New(info.Env(),reel_error(h)); }));
     exports.Set("remove", Napi::Function::New(env, [](Napi::CallbackInfo const& info) { auto h=holder(info)->handle; if (!reel_remove(h,text(info,1).c_str())) throw Napi::Error::New(info.Env(),reel_error(h)); }));
     exports.Set("snapshot", Napi::Function::New(env, [](Napi::CallbackInfo const& info) { return Napi::String::New(info.Env(),reel_snapshot(holder(info)->handle)); }));

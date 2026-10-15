@@ -7,6 +7,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import type { Preview } from '../shared/types'
 import { Store, videoFile } from './store'
 import { run } from './process'
+import { request } from './network'
 export function byteRange(header:string|undefined,size:number):{start:number;end:number}|null{
   if(!header)return {start:0,end:size-1}
   const match=header.match(/^bytes=(\d*)-(\d*)$/)
@@ -16,6 +17,7 @@ export function byteRange(header:string|undefined,size:number):{start:number;end
   else {start=Number(match[1]);end=match[2]?Math.min(Number(match[2]),size-1):size-1}
   return Number.isSafeInteger(start)&&Number.isSafeInteger(end)&&start>=0&&start<size&&end>=start?{start,end}:null
 }
+export function posterURL(value:string){const url=new URL(value);if(url.protocol!=='https:'||url.hostname!=='image.tmdb.org'||url.username||url.password||url.search||url.hash||!/^\/t\/p\/(?:w[1-9]\d*|original)\/[a-zA-Z0-9_.-]+$/.test(url.pathname))throw new Error('Invalid poster URL.');return url}
 export class MediaServer {
   private server:http.Server
   private port=0
@@ -23,11 +25,14 @@ export class MediaServer {
   private children=new Set<ChildProcess>()
   private durationCache=new Map<string,number>()
   private thumbnailJobs=new Map<string,Promise<string|null>>()
+  private posterCache=new Map<string,Buffer>()
+  private posterBytes=0
   private thumbnailTail:Promise<unknown>=Promise.resolve()
   constructor(readonly store:Store,readonly tools:string){this.server=http.createServer((req,res)=>void this.handle(req,res))}
   get ffmpeg(){return path.join(this.tools,process.platform==='win32'?'ffmpeg.exe':'ffmpeg')}
   async start(){await new Promise<void>((resolve,reject)=>{this.server.once('error',reject);this.server.listen(0,'127.0.0.1',()=>{this.port=(this.server.address() as import('node:net').AddressInfo).port;resolve()})})}
   private url(route:string,id:string,params:Record<string,string>={}){const url=new URL(`http://127.0.0.1:${this.port}/${route}/${encodeURIComponent(id)}`);url.searchParams.set('token',this.token);for(const [key,value]of Object.entries(params))url.searchParams.set(key,value);return url.href}
+  poster(value:string){return this.url('poster','tmdb',{url:posterURL(value).href})}
   async duration(id:string){const video=videoFile(this.store.job(id)),stat=await fsp.stat(video),key=video+stat.size+stat.mtimeMs;if(this.durationCache.has(key))return this.durationCache.get(key)!;const result=await run(this.ffmpeg,['-hide_banner','-i',video],{timeout:15_000});const match=result.stderr.toString().match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);if(!match)throw new Error('Could not read the video duration.');const duration=Number(match[1])*3600+Number(match[2])*60+Number(match[3]);this.durationCache.set(key,duration);return duration}
   async preview(id:string,start:number,transcode:boolean):Promise<Preview>{const duration=await this.duration(id),offset=Math.max(0,Math.min(start,duration-0.1));return{url:this.url(transcode?'preview':'video',id,{start:String(offset)}),duration,transcoded:transcode}}
   async thumbnail(id:string):Promise<string|null>{
@@ -42,8 +47,16 @@ export class MediaServer {
   }
   private async handle(req:http.IncomingMessage,res:http.ServerResponse){
     try{
-      const url=new URL(req.url??'/','http://127.0.0.1'),match=url.pathname.match(/^\/(video|preview|thumbnail)\/([^/]+)$/)
+      const url=new URL(req.url??'/','http://127.0.0.1'),match=url.pathname.match(/^\/(video|preview|thumbnail|poster)\/([^/]+)$/)
       if(!match||url.searchParams.get('token')!==this.token||!['GET','HEAD'].includes(req.method??'')){res.writeHead(403);res.end();return}
+      if(match[1]==='poster'){
+        const target=posterURL(url.searchParams.get('url')??'').href
+        let data=this.posterCache.get(target)
+        if(!data){data=await request(target,{networkGroup:'tmdb'},8_000_000);this.posterBytes-=this.posterCache.get(target)?.length??0;this.posterCache.delete(target);while(this.posterBytes+data.length>32_000_000&&this.posterCache.size){const oldest=this.posterCache.keys().next().value!;this.posterBytes-=this.posterCache.get(oldest)!.length;this.posterCache.delete(oldest)}this.posterCache.set(target,data);this.posterBytes+=data.length}
+        const type=data[0]===0xff&&data[1]===0xd8?'image/jpeg':data.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':data.toString('ascii',0,4)==='RIFF'&&data.toString('ascii',8,12)==='WEBP'?'image/webp':undefined
+        if(!type){this.posterCache.delete(target);this.posterBytes-=data.length;res.writeHead(502);res.end();return}
+        res.writeHead(200,{'Content-Type':type,'Content-Length':data.length,'Cache-Control':'private, max-age=3600','X-Content-Type-Options':'nosniff'});res.end(req.method==='HEAD'?undefined:data);return
+      }
       const id=decodeURIComponent(match[2]),job=this.store.job(id)
       res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff')
       if(match[1]==='preview'){
