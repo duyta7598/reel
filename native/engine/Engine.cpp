@@ -41,6 +41,8 @@ struct Engine {
     fs::path state;
     std::map<std::string, lt::torrent_handle> handles;
     std::set<std::string> selected;
+    std::map<std::string,std::set<int>> completed;
+    std::map<std::string,std::set<int>> flushing;
     std::map<std::string,std::pair<int,int>> selections;
     std::string error;
     std::string snapshot;
@@ -65,6 +67,15 @@ struct Engine {
         std::vector<lt::alert*> list;
         session.pop_alerts(&list);
         for (auto* a : list) {
+            if (auto* flushed = lt::alert_cast<lt::cache_flushed_alert>(a)) {
+                for (auto const& [id, handle] : handles) {
+                    auto pending=flushing.find(id);
+                    if(handle==flushed->handle && pending!=flushing.end()){
+                        completed[id].insert(pending->second.begin(),pending->second.end());
+                        flushing.erase(pending);
+                    }
+                }
+            }
             if (auto* r = lt::alert_cast<lt::save_resume_data_alert>(a)) {
                 for (auto const& [id, handle] : handles) {
                     if (handle == r->handle) {
@@ -168,7 +179,7 @@ int reel_remove(ReelEngine raw, const char* id) {
     if (!e) return 0;
     try {
         e->session.remove_torrent(e->handles.at(id));
-        e->handles.erase(id); e->selected.erase(id); e->selections.erase(id);
+        e->handles.erase(id); e->selected.erase(id); e->selections.erase(id); e->completed.erase(id); e->flushing.erase(id);
         fs::remove(e->state / (std::string(id) + ".resume"));
         return 1;
     } catch (std::exception const& ex) { e->error = ex.what(); return 0; }
@@ -188,9 +199,19 @@ const char* reel_snapshot(ReelEngine raw) {
             auto progress=handle.file_progress(lt::torrent_handle::piece_granularity);
             std::string path=chosen.empty()?"":info->files().file_path(chosen.front());
             std::int64_t wanted=0,done=0;
-            bool finished=!chosen.empty();
-            for(auto index:chosen){auto size=info->files().file_size(index),downloaded=progress.at(static_cast<int>(index));wanted+=size;done+=downloaded;if(downloaded<size)finished=false;}
             bool tv=e->selections.at(id).first>=0;
+            std::set<int> ready;
+            for(auto index:chosen){
+                auto size=info->files().file_size(index),downloaded=progress.at(static_cast<int>(index));
+                wanted+=size;done+=downloaded;
+                if(tv && downloaded>=size && !e->completed[id].count(static_cast<int>(index)))ready.insert(static_cast<int>(index));
+            }
+            if(!ready.empty() && !e->flushing.count(id)){
+                e->flushing[id]=std::move(ready);
+                handle.flush_cache();
+            }
+            bool finished=!chosen.empty();
+            for(auto index:chosen)if(!e->completed[id].count(static_cast<int>(index)))finished=false;
             std::string selectionError=tv&&info&&chosen.empty()?"No matching episodes found in this torrent.":"";
             auto s = handle.status();
             if (!first) out << ',';
@@ -209,7 +230,7 @@ const char* reel_snapshot(ReelEngine raw) {
                 if(!firstVideo)out<<',';firstVideo=false;
                 auto name=info->files().file_path(index);auto identity=Engine::episode(name);
                 auto size=info->files().file_size(index),downloaded=progress.at(static_cast<int>(index));
-                out<<"{\"index\":"<<static_cast<int>(index)<<",\"path\":"<<quoted(name)<<",\"size\":"<<size<<",\"downloaded\":"<<downloaded<<",\"completed\":"<<(downloaded>=size?"true":"false");
+                out<<"{\"index\":"<<static_cast<int>(index)<<",\"path\":"<<quoted(name)<<",\"size\":"<<size<<",\"downloaded\":"<<downloaded<<",\"completed\":"<<((tv?e->completed[id].count(static_cast<int>(index))>0:downloaded>=size)?"true":"false");
                 if(identity.first>=0)out<<",\"season\":"<<identity.first<<",\"episode\":"<<identity.second;
                 out<<'}';
             }
