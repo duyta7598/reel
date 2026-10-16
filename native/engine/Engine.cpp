@@ -185,7 +185,7 @@ const char* reel_snapshot(ReelEngine raw) {
         for (auto const& [id, handle] : e->handles) {
             auto chosen=e->videos(handle,id);
             auto info=handle.torrent_file();
-            auto progress=handle.file_progress();
+            auto progress=handle.file_progress(lt::torrent_handle::piece_granularity);
             std::string path=chosen.empty()?"":info->files().file_path(chosen.front());
             std::int64_t wanted=0,done=0;
             bool finished=!chosen.empty();

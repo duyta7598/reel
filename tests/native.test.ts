@@ -7,6 +7,7 @@ import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
 import { setTimeout as delay } from 'node:timers/promises'
 const require=createRequire(import.meta.url),native=require('../build/Release/reel_engine.node')
+function assertFile(file:string,expected:Buffer){assert.equal(fs.statSync(file).size,expected.length);assert.equal(crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),crypto.createHash('sha256').update(expected).digest('hex'))}
 test('native libtorrent transfers a movie between localhost peers and restores state',{timeout:30_000},async()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'reel-native-'))
   let seed:any,download:any,restored:any
@@ -18,7 +19,7 @@ test('native libtorrent transfers a movie between localhost peers and restores s
     native.add(seed,'seed',torrent,seedDir,false);native.add(download,'download',torrent,downloadDir,false)
     let finished=false
     for(let i=0;i<150;i++){const a=JSON.parse(native.snapshot(seed)),b=JSON.parse(native.snapshot(download));if(a[0]?.finished){native.connectPeer(download,'download',native.listenPort(seed));native.connectPeer(seed,'seed',native.listenPort(download))}if(b[0]?.finished){finished=true;break}await delay(100)}
-    assert.equal(finished,true);assert.deepEqual(fs.readFileSync(path.join(downloadDir,'Fixture.mkv')),original)
+    assert.equal(finished,true);assertFile(path.join(downloadDir,'Fixture.mkv'),original)
     native.pause(download,'download',true);native.save(download);await delay(300);native.snapshot(download);native.destroy(download);download=null
     restored=native.create(path.join(root,'download-resume'),true);native.add(restored,'download',torrent,downloadDir,true)
     assert.equal(JSON.parse(native.snapshot(restored))[0].paused,true)
@@ -49,8 +50,8 @@ test('native TV selection transfers every episode in a season, supports one epis
     const allState=JSON.parse(native.snapshot(all))[0],oneState=JSON.parse(native.snapshot(single))[0],missingState=JSON.parse(native.snapshot(missing))[0]
     assert.deepEqual(allState.videos.map((item:any)=>item.episode),[1,2]);assert.equal(allState.videos.every((item:any)=>item.completed),true)
     assert.deepEqual(oneState.videos.map((item:any)=>item.episode),[2]);assert.equal(missingState.finished,false);assert.match(missingState.error,/No matching episodes/)
-    for(const name of ['Fixture.S01E01.mkv','Fixture.S01E02.mkv'])assert.deepEqual(fs.readFileSync(path.join(downloadDir,'Fixture',name)),originals.get(name))
-    assert.deepEqual(fs.readFileSync(path.join(singleDir,'Fixture/Fixture.S01E02.mkv')),originals.get('Fixture.S01E02.mkv'))
+    for(const name of ['Fixture.S01E01.mkv','Fixture.S01E02.mkv'])assertFile(path.join(downloadDir,'Fixture',name),originals.get(name)!)
+    assertFile(path.join(singleDir,'Fixture/Fixture.S01E02.mkv'),originals.get('Fixture.S01E02.mkv')!)
     native.pause(all,'all',true);native.save(all);await delay(300);native.snapshot(all);native.destroy(all);engines.splice(engines.indexOf(all),1)
     const restored=create('all');native.add(restored,'all',torrent,downloadDir,true,1,-1)
     const resumed=JSON.parse(native.snapshot(restored))[0];assert.equal(resumed.paused,true);assert.deepEqual(resumed.videos.map((item:any)=>item.episode),[1,2])
