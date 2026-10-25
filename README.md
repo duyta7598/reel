@@ -109,3 +109,11 @@ Windows uses NSIS. Build with `npm run package:win:release`; upload the generate
 macOS local builds (`npm run package:mac`) use ad-hoc signing and display that automatic updates are unavailable. To build a distributable update, set `REEL_MAC_SIGN_IDENTITY` to a Developer ID Application identity and run `npm run package:mac:release`. This produces signed DMG/ZIP targets; configure notarization with Apple credentials as required for distribution. Upload DMG, ZIP, blockmaps and `latest-mac.yml` to the same version's draft release. Keep the same signing identity/team and app ID across updates. A macOS release build refuses to proceed without the signing identity. Builds and publishing are separate; these commands never publish automatically.
 
 Controller tests cover check/download errors, retries, concurrent checks, busy-task blocking and shutdown ordering. The hidden packaged smoke test checks Settings and unsigned-build gating. A real Windows installed-app upgrade and signed macOS upgrade still need verification with two released versions before relying on the updater for distribution.
+
+## Removing library items
+
+Remove from library keeps files by default. Enable Also delete movie files from disk to permanently delete known videos (including partial downloads) and matching English/Vietnamese SRT files and timing backups. For a season this applies to all its known episodes. Other files and folders remain. Paths outside the movie folder and files shared with another library item are rejected. Subtitle processing and active mobile transfers must finish first. A file error keeps the library entry so deletion can be retried; files already deleted before an error cannot be restored.
+
+The background tray now uses the bundled Reel icon rather than a placeholder. Windows uses its multi-resolution ICO for both tray and window icons; macOS uses a small color Reel icon.
+
+Release descriptions must be written in English and approved by the owner before being added or published. The Windows workflow creates drafts with an empty description until approval.

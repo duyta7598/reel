@@ -47,7 +47,7 @@ export interface CommandMap {
   searchReleases: { input: Movie; output: { releases: Release[]; errors: string[] } }
   addDownload: { input: { release: Release; movie?: Movie; title?: string }; output: AppState }
   pauseDownload: { input: { id: string }; output: AppState }
-  removeDownload: { input: { id: string }; output: AppState }
+  removeDownload: { input: { id: string; deleteFiles?: boolean }; output: AppState }
   reveal: { input: { id: string }; output: void }
   testSource: { input: { source: TorrentSource | SubtitleSource; key?: string }; output: string }
   saveSource: { input: { source: TorrentSource | SubtitleSource; key?: string }; output: AppState }

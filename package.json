@@ -1,6 +1,6 @@
 {
   "name": "reel-electron",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "Personal movie downloads and subtitle preparation",
   "main": "out/main/index.js",

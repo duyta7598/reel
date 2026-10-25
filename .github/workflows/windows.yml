@@ -94,6 +94,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           UPDATE_RELEASE: ${{ inputs.update_release }}
         run: |
+          $notes = Join-Path $env:RUNNER_TEMP 'reel-release-notes.md'
+          [System.IO.File]::WriteAllText($notes, '')
           $version = node -p "require('./package.json').version"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $assets = @(Get-ChildItem dist -File | Where-Object { $_.Name -match '\.(exe|blockmap)$' -or $_.Name -eq 'latest.yml' } | ForEach-Object { $_.FullName })
@@ -106,10 +108,10 @@ jobs:
               if ($existing -ne 'true') { throw 'Do not change a published version. Bump package.json before building a new release.' }
               gh release upload $tag @assets --repo '${{ github.repository }}'
             } else {
-              gh release create $tag @assets --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --title "Reel $version" --notes 'Windows x64. Unsigned installer. Test this draft before publishing; publishing makes it available to installed apps through automatic updates.'
+              gh release create $tag @assets --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --title "Reel $version" --notes-file $notes
             }
           } else {
             $tag = "v$version-windows-test-${{ github.run_number }}-${{ github.run_attempt }}"
-            gh release create $tag @assets --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --prerelease --title "Reel $version Windows test" --notes 'Windows x64 test build. Unsigned installer. Automatic updates ignore this test release. Manual testing on a Windows PC is still required.'
+            gh release create $tag @assets --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --prerelease --title "Reel $version Windows test" --notes-file $notes
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

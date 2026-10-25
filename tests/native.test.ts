@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
+import { deleteMovieFiles } from '../src/main/library-files'
 import { setTimeout as delay } from 'node:timers/promises'
 const require=createRequire(import.meta.url),native=require('../build/Release/reel_engine.node')
 function assertFile(file:string,expected:Buffer){assert.equal(fs.statSync(file).size,expected.length);assert.equal(crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),crypto.createHash('sha256').update(expected).digest('hex'))}
@@ -23,6 +24,8 @@ test('native libtorrent transfers a movie between localhost peers and restores s
     native.pause(download,'download',true);native.save(download);await delay(300);native.snapshot(download);native.destroy(download);download=null
     restored=native.create(path.join(root,'download-resume'),true);native.add(restored,'download',torrent,downloadDir,true)
     assert.equal(JSON.parse(native.snapshot(restored))[0].paused,true)
+    native.remove(restored,'download');assert.deepEqual(JSON.parse(native.snapshot(restored)),[])
+    await deleteMovieFiles([path.join(downloadDir,'Fixture.mkv')]);assert.equal(fs.existsSync(path.join(downloadDir,'Fixture.mkv')),false)
   }finally{for(const engine of [restored,download,seed])if(engine)native.destroy(engine);fs.rmSync(root,{recursive:true,force:true})}
 })
 

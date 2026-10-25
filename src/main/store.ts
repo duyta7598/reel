@@ -1,3 +1,4 @@
+import { movieFiles, deleteMovieFiles } from './library-files'
 import { resolve1337x } from './1337x'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -26,6 +27,7 @@ export class Store extends EventEmitter {
   state:SavedState
   syncing=false
   closing=false
+  readonly removing=new Set<string>()
   engineReady=false
   notice?:string
   readonly busy=new Map<string,Promise<unknown>>()
@@ -65,7 +67,7 @@ export class Store extends EventEmitter {
     if(this.pollBusy||this.closing)return;this.pollBusy=true
     try{
       const snapshots=await this.engine.call<EngineSnapshot[]>('snapshot');let changed=false
-      for(const snapshot of snapshots){const job=this.jobs.find(job=>job.id===snapshot.id);if(!job)continue
+      for(const snapshot of snapshots){const job=this.jobs.find(job=>job.id===snapshot.id);if(!job||this.removing.has(job.id))continue
         if(JSON.stringify(job.engine)!==JSON.stringify(snapshot)){job.engine=snapshot;job.paused=snapshot.paused;changed=true}
         if(snapshot.videoPath)job.videoPath=snapshot.videoPath
         if(job.mediaType==='tv'&&snapshot.videos){
@@ -134,15 +136,32 @@ export class Store extends EventEmitter {
   }
   job(id:string){const job=findJob(this.jobs,id);if(!job)throw new Error('The movie is no longer in your library.');return job}
   async pause(id:string){const target=this.job(id),job=target.torrentID?this.job(target.torrentID):target;if(job.completed)return this.snapshot();await this.engine.call('pause',job.id,!job.paused);job.paused=!job.paused;for(const episode of job.episodes??[])episode.paused=job.paused;this.persist();this.publish();return this.snapshot()}
-  async remove(id:string){const job=this.job(id);if(job.torrentID)throw new Error('Remove the season from the library instead.');if([job,...(job.episodes??[])].some(item=>this.busy.has(item.id)))throw new Error('Wait for subtitle processing to finish before removing this movie.');if(!job.completed&&!job.engineError)await this.engine.call('remove',id);this.state.jobs=this.jobs.filter(job=>job.id!==id);this.matches.delete(id);this.persist();this.publish();return this.snapshot()}
+  async remove(id:string,deleteFiles=false){
+    const job=this.job(id),related=[job,...(job.episodes??[])]
+    if(job.torrentID)throw new Error('Remove the season from the library instead.')
+    if(related.some(item=>this.removing.has(item.id)))throw new Error('This movie is already being removed.')
+    if(this.syncing||related.some(item=>this.busy.has(item.id)||this.aligning.has(item.id)))throw new Error('Wait for subtitle processing to finish before removing this movie.')
+    for(const item of related)this.removing.add(item.id)
+    try{
+      const files=deleteFiles?await movieFiles(job,this.jobs):[]
+      if(this.engineReady){const snapshots=await this.engine.call<EngineSnapshot[]>('snapshot');if(snapshots.some(item=>item.id===id))await this.engine.call('remove',id)}
+      for(const item of related)item.paused=true
+      this.persist();this.publish()
+      if(deleteFiles)await deleteMovieFiles(files)
+      this.state.jobs=this.jobs.filter(item=>item.id!==id)
+      for(const item of related)this.matches.delete(item.id)
+      this.persist();this.publish();return this.snapshot()
+    }finally{for(const item of related)this.removing.delete(item.id)}
+  }
   retry(){for(const job of playableJobs(this.jobs))if(job.completed)job.subtitleNextAttempt=undefined;this.persist();this.publish();void this.scan()}
-  private async scan(){if(this.closing||!this.settings.autoSubtitles||this.syncing||this.busy.size)return;const job=playableJobs(this.jobs).find(job=>job.completed&&(!job.subtitleNextAttempt||job.subtitleNextAttempt<=Date.now()));if(job)await this.fetchSubtitles(job.id,true)}
+  private async scan(){if(this.closing||!this.settings.autoSubtitles||this.syncing||this.busy.size)return;const job=playableJobs(this.jobs).find(job=>job.completed&&!this.removing.has(job.id)&&(!job.subtitleNextAttempt||job.subtitleNextAttempt<=Date.now()));if(job)await this.fetchSubtitles(job.id,true)}
   sync(){
     if(this.syncing||this.closing)return this.snapshot();this.syncing=true;this.publish()
-    this.syncTask=(async()=>{try{for(const job of playableJobs(this.jobs).filter(job=>job.completed)){if(this.closing)break;if(this.busy.has(job.id)){await this.busy.get(job.id);continue}await this.fetchSubtitles(job.id,true)}}finally{this.syncing=false;this.persist();this.publish()}})()
+    this.syncTask=(async()=>{try{for(const job of playableJobs(this.jobs).filter(job=>job.completed&&!this.removing.has(job.id))){if(this.closing)break;if(this.busy.has(job.id)){await this.busy.get(job.id);continue}await this.fetchSubtitles(job.id,true)}}finally{this.syncing=false;this.persist();this.publish()}})()
     return this.snapshot()
   }
   private task<T>(id:string,operation:()=>Promise<T>):Promise<T>{
+    if(this.removing.has(id))return Promise.reject(new Error('This movie is being removed.'))
     const existing=this.busy.get(id);if(existing)return existing as Promise<T>
     const work=Promise.resolve().then(operation).finally(()=>{this.busy.delete(id);this.aligning.delete(id);this.persist();this.publish()})
     this.busy.set(id,work);this.publish();return work

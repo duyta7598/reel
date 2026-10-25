@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -13,6 +13,7 @@ import { TransferServer } from './transfer'
 import { catalog, providers, tvSeasons, tvEpisodes } from './catalog'
 import * as validate from './validation'
 import { configureNetwork, initializeNetwork, networkStatus, testNetwork, closeNetwork } from './routing'
+import { trayImage } from './icons'
 import { abortRequests } from './network'
 import { createUpdates } from './update-runtime'
 import type { DesktopUpdates } from './updates'
@@ -21,7 +22,7 @@ const hidden=process.env.REEL_HEADLESS==='1'
 const root=process.env.REEL_DATA_DIR??path.join(app.getPath('appData'),'Reel Electron')
 app.setPath('userData',root)
 app.setName('Reel')
-const appIcon=path.join(app.getAppPath(),'assets/icon.png')
+const appIcon=path.join(app.getAppPath(),'assets',process.platform==='win32'?'icon.ico':'icon.png')
 if(hidden&&process.platform==='darwin')app.setActivationPolicy('accessory')
 const frontend=path.join(__dirname,'../renderer/index.html')
 const devURL=process.env.REEL_DEV_URL
@@ -61,7 +62,7 @@ async function command<K extends keyof CommandMap>(name:K,input:any):Promise<any
     case 'searchReleases':return store.releases(validate.movie(input))
     case 'addDownload':{const release=input?.release as Release;validate.text(release?.uri,10_000);validate.text(release?.title,1000);const movie=input.movie?validate.movie(input.movie):undefined;if(!store.settings.downloadDirectory){const result=await command('chooseDirectory',undefined);if(!result)throw new Error('Choose a download folder before downloading.')}return store.add(release,movie,input.title)}
     case 'pauseDownload':return store.pause(validate.id(input?.id))
-    case 'removeDownload':return store.remove(validate.id(input?.id))
+    case 'removeDownload':if(input?.deleteFiles!==undefined&&typeof input.deleteFiles!=='boolean')throw new Error('Invalid file deletion option.');if(input?.deleteFiles&&transfer.activeTransfers)throw new Error('Wait for mobile transfers to finish before deleting files.');return store.remove(validate.id(input?.id),input?.deleteFiles??false)
     case 'reveal':{const job=store.job(validate.id(input?.id));shell.showItemInFolder(job.mediaType==='tv'&&!job.torrentID?job.directory:videoFile(job));return}
     case 'testSource':return store.testSource(validate.source(input?.source),input.key===undefined?undefined:validate.text(input.key,10_000))
     case 'saveSource':return store.saveSource(validate.source(input?.source),input.key===undefined?undefined:validate.text(input.key,10_000))
@@ -87,6 +88,7 @@ if(!app.requestSingleInstanceLock())app.quit()
 else{
   app.on('second-instance',()=>showWindow())
   app.whenReady().then(async()=>{
+    if(process.platform==='win32')app.setAppUserModelId('local.reel.electron')
     if(!hidden&&process.platform==='darwin')app.dock?.setIcon(appIcon)
     const addon=app.isPackaged?path.join(process.resourcesPath,'app.asar.unpacked/build/Release/reel_engine.node'):path.join(__dirname,'../../build/Release/reel_engine.node')
     const tools=app.isPackaged?path.join(process.resourcesPath,'SubtitleTools'):path.join(__dirname,'../../Vendor/SubtitleTools')
@@ -98,7 +100,8 @@ else{
     media=new MediaServer(store,tools);await media.start()
     ipcMain.handle('reel:command',async(event,name,input)=>{if(event.sender!==win?.webContents||!allowedSender(event.senderFrame?.url??''))throw new Error('Untrusted IPC sender.');return command(name,input)})
     store.on('change',state=>{if(win&&!win.isDestroyed())win.webContents.send('reel:state',state)})
-    if(!hidden){const icon=nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAJElEQVR4nGNgoBaQq/j6nxRMOwOIdelwNmA0FgaDAQMXC+QCAOFpCCCIFhwGAAAAAElFTkSuQmCC');if(process.platform==='darwin')icon.setTemplateImage(true);tray=new Tray(icon);tray.setToolTip('Reel');tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Reel',click:showWindow},{label:'Sync subtitles',click:()=>store.sync()},{type:'separator'},{label:'Quit Reel',click:()=>app.quit()}]));tray.on('click',showWindow)}
+    const icon=trayImage(app.getAppPath())
+    if(!hidden){tray=new Tray(icon);tray.setToolTip('Reel');tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Reel',click:showWindow},{label:'Sync subtitles',click:()=>store.sync()},{type:'separator'},{label:'Quit Reel',click:()=>app.quit()}]));tray.on('click',showWindow)}
     Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Reel',submenu:[{label:'Open Reel',click:showWindow},{role:'quit'}]},{role:'editMenu'},{role:'viewMenu'},{role:'windowMenu'}]))
     showWindow();if(!hidden)void initializeNetwork().catch(()=>{});await store.start();if(!hidden){void updates.check();updateTimer=setInterval(()=>void updates.check(),6*60*60_000);updateTimer.unref()}
   }).catch(error=>{if(!hidden)dialog.showErrorBox('Reel',error instanceof Error?error.message:'Could not start Reel.');app.exit(1)})
