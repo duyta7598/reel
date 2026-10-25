@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Reel",
+    "slug": "reel-mobile",
+    "version": "0.1.0",
+    "scheme": "reel-mobile",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "../assets/icon.png",
+    "ios": {
+      "bundleIdentifier": "local.reel.mobile",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Reel connects to your computer over Wi-Fi to copy movies and subtitles for offline use.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "android": {
+      "package": "local.reel.mobile",
+      "permissions": [
+        "INTERNET",
+        "CAMERA"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Reel to scan the pairing code on your computer.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-file-system",
+        {
+          "enableFileSharing": true,
+          "supportsOpeningDocumentsInPlace": true
+        }
+      ],
+      "expo-secure-store",
+      "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "platforms": [
+      "ios",
+      "android"
+    ]
+  }
+}

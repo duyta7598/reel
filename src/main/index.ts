@@ -9,11 +9,14 @@ import { Vault } from './vault'
 import { Engine } from './engine'
 import { Store, videoFile, subtitleFile } from './store'
 import { MediaServer } from './media'
+import { TransferServer } from './transfer'
 import { catalog, providers, tvSeasons, tvEpisodes } from './catalog'
 import * as validate from './validation'
 import { configureNetwork, initializeNetwork, networkStatus, testNetwork, closeNetwork } from './routing'
 import { abortRequests } from './network'
-let win:BrowserWindow|null=null,store:Store,media:MediaServer,tray:Tray|null=null,quitting=false
+import { createUpdates } from './update-runtime'
+import type { DesktopUpdates } from './updates'
+let win:BrowserWindow|null=null,store:Store,media:MediaServer,transfer:TransferServer,tray:Tray|null=null,quitting=false,installingUpdate=false,updates:DesktopUpdates,updateTimer:ReturnType<typeof setInterval>|undefined
 const hidden=process.env.REEL_HEADLESS==='1'
 const root=process.env.REEL_DATA_DIR??path.join(app.getPath('appData'),'Reel Electron')
 app.setPath('userData',root)
@@ -33,8 +36,17 @@ function showWindow(){
   if(devURL)void win.loadURL(devURL);else void win.loadFile(frontend)
 }
 async function command<K extends keyof CommandMap>(name:K,input:any):Promise<any>{
+  if(quitting)throw new Error('Reel is restarting or shutting down.')
   switch(name){
+    case 'updateStatus':return updates.status()
+    case 'checkUpdates':return updates.check()
+    case 'installUpdate':try{return await updates.install(async()=>{installingUpdate=true;quitting=true;await shutdown()})}catch(error){if(installingUpdate){app.relaunch();app.exit(1)}throw error}
     case 'state':return store.snapshot()
+    case 'transferStatus':return transfer.status()
+    case 'startTransfer':return transfer.start()
+    case 'stopTransfer':return transfer.stop()
+    case 'pairTransfer':return transfer.newPairing()
+    case 'revokeTransfer':return transfer.revoke(validate.id(input?.id))
     case 'saveSettings':{const value=validate.settings(input),state=store.saveSettings(value);if(value.network){configureNetwork(value.network);if(!hidden)void initializeNetwork().catch(()=>{})}return state}
     case 'networkStatus':return networkStatus()
     case 'testNetwork':return testNetwork()
@@ -67,6 +79,10 @@ async function command<K extends keyof CommandMap>(name:K,input:any):Promise<any
     default:throw new Error('Unsupported command.')
   }
 }
+async function shutdown(){
+  if(updateTimer)clearInterval(updateTimer)
+  abortRequests();if(transfer)await transfer.stop();if(media)await media.close();if(store)await store.close();await closeNetwork();tray?.destroy()
+}
 if(!app.requestSingleInstanceLock())app.quit()
 else{
   app.on('second-instance',()=>showWindow())
@@ -76,15 +92,17 @@ else{
     const tools=app.isPackaged?path.join(process.resourcesPath,'SubtitleTools'):path.join(__dirname,'../../Vendor/SubtitleTools')
     const db=new StateDatabase(root),vault=new Vault(root),engine=new Engine(addon)
     store=new Store(db,vault,engine,tools)
+    transfer=new TransferServer({root:db.root,jobs:()=>store.jobs},hidden?{port:0,host:'127.0.0.1'}:{})
+    updates=createUpdates(value=>{if(value.phase==='error'&&installingUpdate){app.relaunch();app.exit(1);return}if(win&&!win.isDestroyed())win.webContents.send('reel:update',value)},()=>transfer.activeTransfers>0||store.jobs.some(job=>!job.completed&&!job.paused)||store.busy.size>0||store.aligning.size>0||store.syncing)
     configureNetwork(store.settings.network)
     media=new MediaServer(store,tools);await media.start()
     ipcMain.handle('reel:command',async(event,name,input)=>{if(event.sender!==win?.webContents||!allowedSender(event.senderFrame?.url??''))throw new Error('Untrusted IPC sender.');return command(name,input)})
     store.on('change',state=>{if(win&&!win.isDestroyed())win.webContents.send('reel:state',state)})
     if(!hidden){const icon=nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAJElEQVR4nGNgoBaQq/j6nxRMOwOIdelwNmA0FgaDAQMXC+QCAOFpCCCIFhwGAAAAAElFTkSuQmCC');if(process.platform==='darwin')icon.setTemplateImage(true);tray=new Tray(icon);tray.setToolTip('Reel');tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Reel',click:showWindow},{label:'Sync subtitles',click:()=>store.sync()},{type:'separator'},{label:'Quit Reel',click:()=>app.quit()}]));tray.on('click',showWindow)}
     Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Reel',submenu:[{label:'Open Reel',click:showWindow},{role:'quit'}]},{role:'editMenu'},{role:'viewMenu'},{role:'windowMenu'}]))
-    showWindow();if(!hidden)void initializeNetwork().catch(()=>{});await store.start()
+    showWindow();if(!hidden)void initializeNetwork().catch(()=>{});await store.start();if(!hidden){void updates.check();updateTimer=setInterval(()=>void updates.check(),6*60*60_000);updateTimer.unref()}
   }).catch(error=>{if(!hidden)dialog.showErrorBox('Reel',error instanceof Error?error.message:'Could not start Reel.');app.exit(1)})
   app.on('activate',()=>{if(store)showWindow()})
   app.on('window-all-closed',()=>{})
-  app.on('before-quit',event=>{if(quitting)return;event.preventDefault();quitting=true;abortRequests();void(async()=>{try{if(media)await media.close();if(store)await store.close();await closeNetwork()}finally{tray?.destroy();app.quit()}})()})
+  app.on('before-quit',event=>{if(quitting)return;event.preventDefault();quitting=true;void shutdown().finally(()=>app.quit())})
 }

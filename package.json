@@ -1,6 +1,6 @@
 {
   "name": "reel-electron",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Personal movie downloads and subtitle preparation",
   "main": "out/main/index.js",
@@ -13,7 +13,9 @@
     "native": "cmake-js compile",
     "package:mac": "node scripts/check-resources.mjs && npm run build && electron-builder --mac dir --arm64",
     "package:win": "node scripts/check-resources.mjs && npm run build && electron-builder --win nsis --x64",
-    "test:smoke": "node --import tsx tests/smoke.mjs"
+    "test:smoke": "node --import tsx tests/smoke.mjs",
+    "package:mac:release": "node scripts/package-release.mjs mac",
+    "package:win:release": "node scripts/package-release.mjs win"
   },
   "build": {
     "appId": "local.reel.electron",
@@ -45,7 +47,7 @@
     "mac": {
       "category": "public.app-category.entertainment",
       "icon": "assets/icon.icns",
-      "identity": null
+      "identity": "-"
     },
     "win": {
       "target": [
@@ -56,13 +58,23 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "duyta7598",
+        "repo": "reel-releases",
+        "releaseType": "release"
+      }
+    ]
   },
   "dependencies": {
+    "electron-updater": "6.8.11",
     "fast-xml-parser": "5.11.2",
     "lucide-react": "1.57.0",
     "node-addon-api": "8.9.2",
     "node-html-parser": "9.0.4",
+    "qrcode": "1.5.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "undici": "8.12.1",
@@ -71,6 +83,7 @@
   "devDependencies": {
     "@playwright/test": "1.64.1",
     "@types/node": "26.6.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@types/yauzl": "3.4.0",

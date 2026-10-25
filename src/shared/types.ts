@@ -1,3 +1,5 @@
+import type { UpdateStatus } from './update'
+import type { TransferStatus } from './transfer'
 import type { NetworkSettings, NetworkStatus } from './network'
 export type Language = 'en' | 'vi'
 export type MediaType = 'movie' | 'tv'
@@ -22,6 +24,14 @@ export interface Provider { id: number; name: string }
 export interface SubtitleCue { start: number; end: number; text: string }
 export interface Preview { url: string; duration: number; transcoded: boolean }
 export interface CommandMap {
+  updateStatus: { input: undefined; output: UpdateStatus }
+  checkUpdates: { input: undefined; output: UpdateStatus }
+  installUpdate: { input: undefined; output: UpdateStatus }
+  transferStatus: { input: undefined; output: TransferStatus }
+  startTransfer: { input: undefined; output: TransferStatus }
+  stopTransfer: { input: undefined; output: TransferStatus }
+  pairTransfer: { input: undefined; output: TransferStatus }
+  revokeTransfer: { input: { id: string }; output: TransferStatus }
   state: { input: undefined; output: AppState }
   networkStatus: { input: undefined; output: NetworkStatus }
   testNetwork: { input: undefined; output: NetworkStatus }
@@ -54,5 +64,5 @@ export interface CommandMap {
   openLink: { input: { url: string }; output: void }
 }
 export type Invoke = <K extends keyof CommandMap>(command: K, input: CommandMap[K]['input']) => Promise<CommandMap[K]['output']>
-export interface ReelAPI { invoke: Invoke; subscribe: (callback: (state: AppState) => void) => () => void }
+export interface ReelAPI { invoke: Invoke; subscribeUpdates: (callback: (state: UpdateStatus) => void) => () => void; subscribe: (callback: (state: AppState) => void) => () => void }
 declare global { interface Window { reel: ReelAPI } }

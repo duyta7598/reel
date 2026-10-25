@@ -22,7 +22,7 @@ npm run test:smoke
 npm run package:mac
 ```
 
-The packaged application is `dist/mac-arm64/Reel.app`. It is an unsigned local build for Apple Silicon. Closing the window keeps downloads running; quit using the tray or application menu.
+The packaged application is `dist/mac-arm64/Reel.app`. It is an ad-hoc-signed local build for Apple Silicon, without a Developer ID. Closing the window keeps downloads running; quit using the tray or application menu.
 
 ## Windows build
 
@@ -93,3 +93,19 @@ Each torrent is managed as one download. Its Episodes list shows individual file
 - The packaged app passed invisible smoke checks for native worker startup, isolated IPC, Settings, light/dark, Vietnamese, library, torrent dialog, video playback, subtitle overlay, byte-range seek, local server authorization, compatible preview, TV episode lists and separate video/subtitle playback for two episodes. Checks used synthetic local media and an isolated temporary profile.
 - Network settings passed packaged smoke checks; live TMDB requests succeeded through both HTTP and SOCKS5 WARP proxy connections, and a TMDB poster returned HTTP 200. Internet torrent swarms on the home connection remain unverified.
 - Authenticated live subtitle-provider downloads and Windows compilation/runtime remain unverified.
+
+## Mobile offline transfers
+
+The `mobile` folder contains the Android/iOS Expo app for browsing the desktop library and saving original videos plus SRT subtitles offline. Open Settings → Mobile transfer on desktop to enable local sharing and pair a phone by QR. Sharing is off by default. Phones use external apps to open saved files. See `mobile/README.md` for local development, transfer behavior, storage/export options and device-testing limits.
+
+## Desktop updates
+
+Settings → Updates checks for stable versions, downloads in the background, shows progress and release notes, and offers Restart to update. Checks also run at startup and every six hours. Downloads, active mobile file transfers and subtitle tasks must be paused or finished before applying an update. Closing the window or quitting normally does not trigger installation. Library/settings remain in the existing Reel Electron data directory; downloaded media stays in its selected folder.
+
+Update files are hosted in the public binary-only repository `duyta7598/reel-releases`. The source repository stays private. No GitHub access token is shipped with the app. Drafts and prereleases are ignored. Each stable release must have a higher package.json version than the previous one; overwrite neither an existing version nor its files. Existing 0.2.0 installations need one manual install of an updater-enabled build.
+
+Windows uses NSIS. Build with `npm run package:win:release`; upload the generated installer, its `.blockmap`, and `latest.yml` together to a draft `v<version>` release. Validate the draft before publishing. In the Windows workflow, enable `update_release` to save a draft in reel-releases; this requires a source-repository secret `REEL_RELEASE_TOKEN` with Contents write access only to reel-releases. The default workflow remains a private test prerelease. The public repo must contain at least one commit before its first release can be created.
+
+macOS local builds (`npm run package:mac`) use ad-hoc signing and display that automatic updates are unavailable. To build a distributable update, set `REEL_MAC_SIGN_IDENTITY` to a Developer ID Application identity and run `npm run package:mac:release`. This produces signed DMG/ZIP targets; configure notarization with Apple credentials as required for distribution. Upload DMG, ZIP, blockmaps and `latest-mac.yml` to the same version's draft release. Keep the same signing identity/team and app ID across updates. A macOS release build refuses to proceed without the signing identity. Builds and publishing are separate; these commands never publish automatically.
+
+Controller tests cover check/download errors, retries, concurrent checks, busy-task blocking and shutdown ordering. The hidden packaged smoke test checks Settings and unsigned-build gating. A real Windows installed-app upgrade and signed macOS upgrade still need verification with two released versions before relying on the updater for distribution.
