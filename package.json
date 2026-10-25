@@ -1,6 +1,6 @@
 {
   "name": "reel-electron",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "Personal movie downloads and subtitle preparation",
   "main": "out/main/index.js",
@@ -58,7 +58,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "include": "installer/windows.nsh"
     },
     "publish": [
       {

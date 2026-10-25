@@ -10,11 +10,12 @@ class Driver extends EventEmitter implements UpdateDriver {
   checks=0
   downloads=0
   installed=false
+  installOptions?:{silent?:boolean;forceRunAfter?:boolean}
   checkAction:()=>Promise<unknown>=async()=>{this.emit('update-available',{version:'0.4.0',releaseNotes:'New release'})}
   downloadAction:()=>Promise<unknown>=async()=>{this.emit('download-progress',{percent:45,transferred:45,total:100});this.emit('update-downloaded',{version:'0.4.0'})}
   async checkForUpdates(){this.checks++;return this.checkAction()}
   async downloadUpdate(){this.downloads++;return this.downloadAction()}
-  quitAndInstall(){this.installed=true}
+  quitAndInstall(silent?:boolean,forceRunAfter?:boolean){this.installed=true;this.installOptions={silent,forceRunAfter}}
 }
 const tick=()=>new Promise<void>(resolve=>setImmediate(resolve))
 test('update gates reject development, unsupported platforms and unsigned Mac builds',async()=>{
@@ -37,6 +38,7 @@ test('checks coalesce, download automatically, and install only after explicit s
   let prepared=false
   await updates.install(async()=>{assert.equal(driver.installed,false);prepared=true})
   assert.equal(prepared,true);assert.equal(driver.installed,true)
+  assert.deepEqual(driver.installOptions,{silent:true,forceRunAfter:true})
   await assert.rejects(updates.install(async()=>{}),/Download/)
 })
 test('running transfers or subtitle tasks block installing without stopping the app',async()=>{

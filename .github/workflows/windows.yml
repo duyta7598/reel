@@ -1,11 +1,14 @@
 name: Windows installer
 on:
+  push:
+    branches: [main]
+    paths: [package.json]
   workflow_dispatch:
     inputs:
       update_release:
         description: Create a draft stable update in this repository
         type: boolean
-        default: false
+        default: true
 permissions:
   contents: read
 concurrency:
@@ -82,6 +85,8 @@ jobs:
           key: ${{ steps.subtitle-cache.outputs.cache-primary-key }}
       - run: npm test
       - run: npm run package:win -- --publish never
+      - name: Verify update artifacts
+        run: node scripts/check-update-artifacts.mjs
       - name: Test packaged application
         shell: pwsh
         run: |
@@ -92,7 +97,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          UPDATE_RELEASE: ${{ inputs.update_release }}
+          UPDATE_RELEASE: ${{ github.event_name == 'push' || inputs.update_release }}
         run: |
           $notes = Join-Path $env:RUNNER_TEMP 'reel-release-notes.md'
           [System.IO.File]::WriteAllText($notes, '')

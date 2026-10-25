@@ -30,6 +30,7 @@ const allowedSender=(url:string)=>devURL?url.startsWith(devURL+'/'):url===pathTo
 function showWindow(){
   if(win&&!win.isDestroyed()){if(!hidden){win.show();win.focus()}return}
   win=new BrowserWindow({width:1180,height:790,minWidth:960,minHeight:650,show:false,icon:appIcon,title:'Reel',backgroundColor:'#18111f',titleBarStyle:process.platform==='darwin'?'hiddenInset':'default',webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true,offscreen:hidden}})
+  if(process.platform==='win32')win.removeMenu()
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',(event,url)=>{if(!allowedSender(url))event.preventDefault()})
   win.webContents.session.setPermissionRequestHandler((_,__,callback)=>callback(false))
   win.once('ready-to-show',()=>{if(!hidden)win?.show()})

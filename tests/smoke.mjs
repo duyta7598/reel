@@ -17,6 +17,7 @@ const env={...process.env,REEL_HEADLESS:'1',REEL_DATA_DIR:root}
 delete env.ELECTRON_RUN_AS_NODE
 const application=await electron.launch({...(process.env.REEL_APP_PATH?{executablePath:process.platform==='win32'?process.env.REEL_APP_PATH:path.join(process.env.REEL_APP_PATH,'Contents/MacOS/Reel'),args:[]}:{args:[path.resolve('.')]}),env,timeout:30_000})
 try{
+  if(process.platform==='win32')assert.equal(await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isMenuBarVisible()),false)
   const page=await application.firstWindow(),errors=[]
   page.setDefaultTimeout(15_000)
   page.on('pageerror',error=>errors.push(error.message))
@@ -152,5 +153,5 @@ try{
   assert.equal(fs.existsSync(movie),true)
   assert.equal(await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(window=>window.isVisible())),false)
   assert.deepEqual(errors,[])
-  process.stdout.write(JSON.stringify({passed:true,checks:['library removal keeps files by default and explicitly deletes season files','Reel tray icon asset loads without placeholder','update settings and unsigned/development update gates','native worker','isolated preload IPC','downloads','settings','light/dark','Vietnamese','library','torrent dialog','hidden window','video playback','subtitle overlay','byte-range seek','local server authorization','compatible preview','TV episode list','per-episode playback and subtitle overlay','per-episode subtitle management','1337x source settings without API key','automatic network defaults and editable proxy','mobile QR pairing and authenticated library','mobile access revocation'],screenshot:path.join(root,'light.png')})+'\n')
+  process.stdout.write(JSON.stringify({passed:true,checks:[...(process.platform==='win32'?['Windows native menu bar hidden']:[]),'library removal keeps files by default and explicitly deletes season files','Reel tray icon asset loads without placeholder','update settings and unsigned/development update gates','native worker','isolated preload IPC','downloads','settings','light/dark','Vietnamese','library','torrent dialog','hidden window','video playback','subtitle overlay','byte-range seek','local server authorization','compatible preview','TV episode list','per-episode playback and subtitle overlay','per-episode subtitle management','1337x source settings without API key','automatic network defaults and editable proxy','mobile QR pairing and authenticated library','mobile access revocation'],screenshot:path.join(root,'light.png')})+'\n')
 }catch(error){const page=await application.firstWindow();process.stdout.write(JSON.stringify({error:String(error),body:await page.locator('body').innerText()})+'\n');throw error}finally{await application.evaluate(({app})=>app.quit());await application.close()}

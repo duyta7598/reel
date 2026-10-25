@@ -51,7 +51,7 @@ export class DesktopUpdates {
     if(this.state.phase!=='ready')throw new Error('Download an update before restarting.')
     if(this.busy())throw new Error('Pause downloads and wait for mobile transfers and subtitle tasks before updating.')
     this.set({phase:'installing',error:undefined})
-    try{await prepare();this.driver.quitAndInstall(false,true)}catch(error){this.set({phase:'ready',error:error instanceof Error?error.message:'Could not install the update.'});throw error}
+    try{await prepare();this.driver.quitAndInstall(true,true)}catch(error){this.set({phase:'ready',error:error instanceof Error?error.message:'Could not install the update.'});throw error}
     return this.status()
   }
 }
