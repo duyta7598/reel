@@ -1,6 +1,6 @@
 {
   "name": "reel-electron",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Personal movie downloads and subtitle preparation",
   "main": "out/main/index.js",
@@ -53,7 +53,8 @@
       "target": [
         "nsis"
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -63,7 +64,7 @@
       {
         "provider": "github",
         "owner": "duyta7598",
-        "repo": "reel-releases",
+        "repo": "reel",
         "releaseType": "release"
       }
     ]

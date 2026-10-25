@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       update_release:
-        description: Create a draft stable update in reel-releases
+        description: Create a draft stable update in this repository
         type: boolean
         default: false
 permissions:
@@ -22,16 +22,6 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
-      - name: Check update release access
-        if: inputs.update_release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.REEL_RELEASE_TOKEN }}
-        run: |
-          if (-not $env:GH_TOKEN) { throw 'Configure REEL_RELEASE_TOKEN with contents write access to duyta7598/reel-releases' }
-          $canPush = gh api repos/duyta7598/reel-releases --jq .permissions.push
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ($canPush -ne 'true') { throw 'REEL_RELEASE_TOKEN needs Contents write access to reel-releases' }
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -101,8 +91,7 @@ jobs:
       - name: Save draft release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ inputs.update_release && secrets.REEL_RELEASE_TOKEN || github.token }}
-          REEL_RELEASE_TOKEN: ${{ secrets.REEL_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           UPDATE_RELEASE: ${{ inputs.update_release }}
         run: |
           $version = node -p "require('./package.json').version"
@@ -111,14 +100,13 @@ jobs:
           if (-not (Test-Path dist/latest.yml)) { throw 'Update metadata missing' }
           if (@(Get-ChildItem dist -Filter '*.exe').Count -eq 0) { throw 'Windows installer missing' }
           if ($env:UPDATE_RELEASE -eq 'true') {
-            if (-not $env:REEL_RELEASE_TOKEN) { throw 'Configure REEL_RELEASE_TOKEN with contents write access to duyta7598/reel-releases' }
             $tag = "v$version"
-            $existing = gh release view $tag --repo duyta7598/reel-releases --json isDraft --jq .isDraft 2>$null
+            $existing = gh release view $tag --repo '${{ github.repository }}' --json isDraft --jq .isDraft 2>$null
             if ($LASTEXITCODE -eq 0) {
               if ($existing -ne 'true') { throw 'Do not change a published version. Bump package.json before building a new release.' }
-              gh release upload $tag @assets --repo duyta7598/reel-releases
+              gh release upload $tag @assets --repo '${{ github.repository }}'
             } else {
-              gh release create $tag @assets --repo duyta7598/reel-releases --draft --title "Reel $version" --notes 'Windows x64. Unsigned installer. Test this draft before publishing; publishing makes it available to installed apps through automatic updates.'
+              gh release create $tag @assets --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --title "Reel $version" --notes 'Windows x64. Unsigned installer. Test this draft before publishing; publishing makes it available to installed apps through automatic updates.'
             }
           } else {
             $tag = "v$version-windows-test-${{ github.run_number }}-${{ github.run_attempt }}"
