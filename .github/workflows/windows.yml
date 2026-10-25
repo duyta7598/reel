@@ -120,3 +120,13 @@ jobs:
             gh release create $tag @assets --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --prerelease --title "Reel $version Windows test" --notes-file $notes
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish stable update
+        if: github.event_name == 'push' || inputs.update_release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release edit "v$version" --repo '${{ github.repository }}' --draft=false --prerelease=false --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -116,6 +116,6 @@ Remove from library keeps files by default. Enable Also delete movie files from 
 
 The background tray now uses the bundled Reel icon rather than a placeholder. Windows uses its multi-resolution ICO for both tray and window icons; macOS uses a small color Reel icon.
 
-New releases are published with an empty description; no description approval step is required. Existing release descriptions are left unchanged. The Windows workflow builds and validates a draft before publication.
+New releases are published with an empty description; no description approval step is required. Existing release descriptions are left unchanged. The Windows workflow builds, validates and automatically publishes stable updates with an empty description. Test prerelease drafts are not published automatically.
 
 Windows windows do not display the native application menu bar. Existing 0.3.1+ Windows installations use Settings → Updates and Restart to update; no manual installer download is needed for published stable versions. The 0.3.0 build still targets the old release repository and needs the previously agreed one-time transition install. The app still downloads update data in the background; initial installation remains available through the installer.
