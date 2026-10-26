@@ -25,6 +25,28 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.REEL_RELEASE_TOKEN }}
+          UPDATE_RELEASE: ${{ github.event_name == 'push' || inputs.update_release }}
+        run: |
+          if (-not $env:GH_TOKEN) { throw 'Configure the REEL_RELEASE_TOKEN repository secret with Contents and Workflows write permissions.' }
+          gh api 'repos/${{ github.repository }}' --silent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:UPDATE_RELEASE -eq 'true') {
+            $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            $tag = "v$version"
+            $existing = gh release view $tag --repo '${{ github.repository }}' --json isDraft --jq .isDraft 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              if ($existing -ne 'true') { throw 'Do not change a published version. Bump package.json before building a new release.' }
+            } else {
+              $notes = Join-Path $env:RUNNER_TEMP 'reel-release-notes.md'
+              [System.IO.File]::WriteAllText($notes, '')
+              gh release create $tag --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --title "Reel $version" --notes-file $notes
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -93,10 +115,20 @@ jobs:
           $env:REEL_APP_PATH = "$env:GITHUB_WORKSPACE/dist/win-unpacked/Reel.exe"
           npm run test:smoke
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Save validated installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/Reel-Setup-*.exe
+            dist/Reel-Setup-*.exe.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+          retention-days: 7
       - name: Save draft release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.REEL_RELEASE_TOKEN }}
           UPDATE_RELEASE: ${{ github.event_name == 'push' || inputs.update_release }}
         run: |
           $notes = Join-Path $env:RUNNER_TEMP 'reel-release-notes.md'
@@ -124,7 +156,7 @@ jobs:
         if: github.event_name == 'push' || inputs.update_release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.REEL_RELEASE_TOKEN }}
         run: |
           $version = node -p "require('./package.json').version"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
